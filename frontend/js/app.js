@@ -1,3 +1,29 @@
+// Render Backend Connection Config
+const RENDER_BACKEND_URL = 'https://phobiabot.onrender.com';
+
+function getApiBase() {
+  const custom = localStorage.getItem('API_BASE_URL');
+  if (custom) return custom.replace(/\/+$/, '');
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1' || host.includes('onrender.com')) {
+    return '';
+  }
+  return RENDER_BACKEND_URL;
+}
+
+const API_BASE = getApiBase();
+
+// Intercept relative /api/ requests so Vercel forwards directly to Render
+if (API_BASE) {
+  const originalFetch = window.fetch;
+  window.fetch = function (resource, init) {
+    if (typeof resource === 'string' && resource.startsWith('/api/')) {
+      resource = API_BASE + resource;
+    }
+    return originalFetch.call(this, resource, init);
+  };
+}
+
 // State Store
 const state = {
   status: null,

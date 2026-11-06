@@ -31,7 +31,7 @@
   </script>
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
-  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="stylesheet" href="css/style.css" />
 </head>
 <body class="bg-[#0b1120] text-slate-100 font-sans antialiased min-h-screen flex flex-col md:flex-row overflow-x-hidden">
 
@@ -376,7 +376,7 @@
           <button onclick="clearAllLeads()" class="px-3.5 py-2 rounded-xl bg-red-950/30 border border-red-800/40 hover:bg-red-900/40 text-red-300 text-xs font-semibold transition">
             <i class="fa-solid fa-trash-can mr-1"></i> Clear All
           </button>
-          <a href="/api/scout/export-csv" download class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs tracking-wide shadow-lg shadow-brand-600/30 flex items-center gap-2 transition">
+          <a id="exportCsvBtn" href="/api/scout/export-csv" download class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs tracking-wide shadow-lg shadow-brand-600/30 flex items-center gap-2 transition">
             <i class="fa-solid fa-file-excel"></i> Export CSV
           </a>
         </div>
@@ -622,6 +622,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
