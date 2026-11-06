@@ -325,6 +325,13 @@ function renderTemplatesList() {
 }
 
 function renderTemplatePickers() {
+  // Quick Broadcast template select dropdown
+  const quickTplSelect = document.getElementById('quickTemplateSelect');
+  if (quickTplSelect) {
+    quickTplSelect.innerHTML = '<option value="all">🔄 Rotate Across All Saved Templates (Spintax)</option>' +
+      state.templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  }
+
   // Test Post select dropdown
   const testSelect = document.getElementById('testPostTemplateSelect');
   if (testSelect) {
@@ -458,6 +465,15 @@ async function loadGroups() {
 }
 
 function renderGroupPickers() {
+  // Update group count badges across dashboard and auto-poster
+  const totalCount = state.groups.length;
+  const posterBadge = document.getElementById('posterTotalGroupsBadge');
+  const targetCountText = document.getElementById('quickTargetCountText');
+  const kpiGroups = document.getElementById('kpiGroups');
+  if (posterBadge) posterBadge.innerText = `${totalCount} Groups`;
+  if (targetCountText) targetCountText.innerText = totalCount;
+  if (kpiGroups) kpiGroups.innerText = totalCount;
+
   // Test Post Target Group Dropdown
   const testGroupSelect = document.getElementById('testPostGroupSelect');
   if (testGroupSelect) {
@@ -489,6 +505,85 @@ function selectAllGroups(checked) {
   checkboxes.forEach(cb => cb.checked = checked);
 }
 
+// ----------------- QUICK ALL-GROUPS BROADCASTER -----------------
+function setQuickInterval(val, unit) {
+  const valInput = document.getElementById('quickIntervalVal');
+  const unitSelect = document.getElementById('quickIntervalUnit');
+  if (valInput) valInput.value = val;
+  if (unitSelect) unitSelect.value = unit;
+  showNotification(`Posting schedule set to: every ${val} ${unit}`, 'info');
+}
+
+async function startQuickBroadcast() {
+  const btn = document.getElementById('btnQuickStartBroadcast');
+  const val = parseInt(document.getElementById('quickIntervalVal').value) || 30;
+  const unit = document.getElementById('quickIntervalUnit').value || 'minutes';
+  const tplVal = document.getElementById('quickTemplateSelect').value;
+  const delayMin = parseInt(document.getElementById('quickDelayMin').value) || 10;
+  const delayMax = parseInt(document.getElementById('quickDelayMax').value) || 30;
+
+  if (state.groups.length === 0) {
+    showNotification('No Telegram groups found! Please connect your Telegram account first.', 'warning');
+    return;
+  }
+
+  let templateIds = null;
+  if (tplVal !== 'all') {
+    templateIds = [parseInt(tplVal)];
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Launching Auto-Broadcaster...';
+
+  try {
+    const res = await fetch('/api/campaigns/quick-start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `All-Groups Broadcast (${val} ${unit})`,
+        template_ids: templateIds,
+        interval_val: val,
+        interval_unit: unit,
+        post_to_all: true,
+        delay_min: delayMin,
+        delay_max: delayMax
+      })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showNotification(`🚀 Auto-Posting Started! Broadcasting to all ${state.groups.length} groups every ${val} ${unit}.`, 'success');
+      await loadCampaigns();
+      await loadStats();
+      await loadLogs();
+    } else {
+      showNotification(data.detail || data.error || 'Failed to start auto-poster', 'error');
+    }
+  } catch (err) {
+    showNotification(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-play mr-2"></i> START AUTO-POSTING TO ALL GROUPS';
+  }
+}
+
+async function pauseQuickBroadcast() {
+  const activeCamp = state.campaigns.find(c => c.status === 'running');
+  if (!activeCamp) {
+    showNotification('No running campaign to pause.', 'info');
+    return;
+  }
+  await pauseCampaign(activeCamp.id);
+}
+
+async function stopQuickBroadcast() {
+  const activeCamp = state.campaigns.find(c => c.status === 'running' || c.status === 'paused');
+  if (!activeCamp) {
+    showNotification('No active campaign to stop.', 'info');
+    return;
+  }
+  await stopCampaign(activeCamp.id);
+}
+
 // ----------------- AUTO-POSTER CAMPAIGNS -----------------
 async function loadCampaigns() {
   try {
@@ -501,6 +596,38 @@ async function loadCampaigns() {
 }
 
 function renderCampaigns() {
+  // Update Quick Broadcast Status Box
+  const activeCamp = state.campaigns.find(c => c.status === 'running') || state.campaigns.find(c => c.status === 'paused') || state.campaigns[0];
+  const qBadge = document.getElementById('quickCampStatusBadge');
+  const qPosts = document.getElementById('quickCampPostsCount');
+  const qNext = document.getElementById('quickCampNextRun');
+  if (activeCamp && qBadge) {
+    if (activeCamp.status === 'running') {
+      qBadge.className = 'font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-800 px-2.5 py-0.5 rounded-full uppercase text-[10px] animate-pulse';
+      qBadge.innerText = 'RUNNING';
+    } else if (activeCamp.status === 'paused') {
+      qBadge.className = 'font-bold text-amber-300 bg-amber-950/80 border border-amber-800 px-2.5 py-0.5 rounded-full uppercase text-[10px]';
+      qBadge.innerText = 'PAUSED';
+    } else {
+      qBadge.className = 'font-bold text-slate-300 bg-slate-800 px-2.5 py-0.5 rounded-full uppercase text-[10px]';
+      qBadge.innerText = 'STOPPED';
+    }
+    if (qPosts) qPosts.innerText = activeCamp.posts_sent || 0;
+    if (qNext) {
+      if (activeCamp.next_run && activeCamp.status === 'running') {
+        const d = new Date(activeCamp.next_run);
+        qNext.innerText = `${d.toLocaleTimeString()} (every ${activeCamp.interval_val} ${activeCamp.interval_unit})`;
+      } else {
+        qNext.innerText = activeCamp.status === 'running' ? 'Broadcasting...' : 'None';
+      }
+    }
+  } else if (qBadge) {
+    qBadge.className = 'font-bold text-slate-300 bg-slate-800 px-2.5 py-0.5 rounded-full uppercase text-[10px]';
+    qBadge.innerText = 'IDLE';
+    if (qPosts) qPosts.innerText = '0';
+    if (qNext) qNext.innerText = 'None';
+  }
+
   const container = document.getElementById('campaignsList');
   if (!container) return;
 
@@ -781,11 +908,64 @@ async function runScoutScan() {
     });
     const data = await res.json();
     if (data.success) {
-      showNotification(`Scout scan complete! Discovered ${data.total_leads_found} new leads.`, 'success');
+      showNotification(`Scout scan complete! Found ${data.total_leads_found} members talking about IPTV!`, 'success');
       await loadLeads();
       await loadStats();
       await loadLogs();
-      switchTab('tab-leads');
+
+      // Render Scout Live Results Preview Box
+      const resultsBox = document.getElementById('scoutResultsBox');
+      const resultsList = document.getElementById('scoutResultsList');
+      const foundBadge = document.getElementById('scoutFoundBadge');
+
+      if (resultsBox && resultsList) {
+        resultsBox.classList.remove('hidden');
+        if (foundBadge) foundBadge.innerText = `${data.total_leads_found} Leads Discovered`;
+
+        // Gather all newly discovered leads from details or recent leads
+        let allDiscovered = [];
+        if (Array.isArray(data.details)) {
+          data.details.forEach(d => {
+            if (Array.isArray(d.leads)) allDiscovered.push(...d.leads);
+          });
+        }
+        if (allDiscovered.length === 0 && state.leads.length > 0) {
+          allDiscovered = state.leads.slice(0, 10);
+        }
+
+        if (allDiscovered.length === 0) {
+          resultsList.innerHTML = `
+            <div class="p-6 text-center text-slate-500 text-xs">
+              No new messages matched IPTV keywords in this scan. Try scanning more messages or adding custom keywords.
+            </div>`;
+        } else {
+          resultsList.innerHTML = allDiscovered.map(lead => {
+            const fullName = `${lead.first_name || ''} ${lead.last_name || ''}`.trim() || 'Telegram User';
+            const dmLink = lead.username 
+              ? `<a href="https://t.me/${lead.username}" target="_blank" class="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 font-bold text-xs flex items-center gap-1.5 transition">
+                   <i class="fa-brands fa-telegram"></i> DM @${escapeHtml(lead.username)}
+                 </a>`
+              : `<span class="text-[11px] text-slate-500 font-mono">ID: ${lead.user_id}</span>`;
+
+            return `
+              <div class="p-4 rounded-xl bg-slate-950/80 border border-darkBorder flex flex-col md:flex-row md:items-center justify-between gap-3 hover:border-brand-500/40 transition">
+                <div class="space-y-1 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-white text-sm">${escapeHtml(fullName)}</span>
+                    <span class="px-2 py-0.5 rounded-md bg-brand-950 text-brand-300 text-[10px] font-bold border border-brand-800 uppercase">${escapeHtml(lead.matched_keyword)}</span>
+                    <span class="text-[11px] text-slate-500"><i class="fa-solid fa-users text-[10px] mr-1"></i>${escapeHtml(lead.group_title || 'Group')}</span>
+                  </div>
+                  <p class="text-xs text-slate-300 italic bg-slate-900/60 p-2 rounded-lg border border-darkBorder/40">"${escapeHtml(lead.message_text || '')}"</p>
+                  <p class="text-[10px] text-slate-500">${lead.detected_at || ''}</p>
+                </div>
+                <div class="flex-shrink-0">
+                  ${dmLink}
+                </div>
+              </div>`;
+          }).join('');
+        }
+      }
+
     } else {
       showNotification(data.error || 'Scout scan failed', 'error');
     }
@@ -793,7 +973,7 @@ async function runScoutScan() {
     showNotification(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-crosshairs"></i> Launch Scout Scanner';
+    btn.innerHTML = '<i class="fa-solid fa-magnifying-glass-plus"></i> Scout All Members Talking About IPTV';
   }
 }
 
@@ -974,6 +1154,8 @@ async function loadStats() {
     document.getElementById('kpiPosts').innerText = data.posts_sent || 0;
     document.getElementById('kpiTemplates').innerText = data.templates_count || 0;
     document.getElementById('kpiActiveCampaigns').innerText = data.active_campaigns || 0;
+    const kpiGroups = document.getElementById('kpiGroups');
+    if (kpiGroups) kpiGroups.innerText = state.groups.length || 0;
   } catch (err) {
     console.error('Failed to load stats:', err);
   }

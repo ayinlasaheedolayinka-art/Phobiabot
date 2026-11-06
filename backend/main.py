@@ -68,11 +68,20 @@ class TemplatePreview(BaseModel):
 class CampaignCreate(BaseModel):
     name: str
     template_ids: List[int]
-    target_group_ids: List[int]
+    target_group_ids: List[Any]
     interval_val: int = 30
     interval_unit: str = "minutes"
     delay_min: int = 15
     delay_max: int = 45
+
+class QuickCampaignRequest(BaseModel):
+    name: Optional[str] = "Auto-Broadcast to All Groups"
+    template_ids: Optional[List[int]] = None
+    interval_val: int = 30
+    interval_unit: str = "seconds"
+    post_to_all: bool = True
+    delay_min: int = 10
+    delay_max: int = 30
 
 class TestPostRequest(BaseModel):
     group_id: int
@@ -180,6 +189,33 @@ def list_campaigns():
 def add_campaign(req: CampaignCreate):
     camp_id = create_campaign(req.dict())
     return {"success": True, "id": camp_id}
+
+@app.post("/api/campaigns/quick-start")
+async def quick_start_campaign(req: QuickCampaignRequest):
+    template_ids = req.template_ids or []
+    if not template_ids:
+        all_tpls = get_templates()
+        template_ids = [t["id"] for t in all_tpls]
+
+    if not template_ids:
+        raise HTTPException(status_code=400, detail="No content templates found. Please create at least 1 template first.")
+
+    target_groups = ["all"] if req.post_to_all else ["all"]
+
+    camp_data = {
+        "name": req.name or "Auto-Broadcast to All Groups",
+        "template_ids": template_ids,
+        "target_group_ids": target_groups,
+        "interval_val": max(5, int(req.interval_val)),
+        "interval_unit": req.interval_unit,
+        "delay_min": max(3, int(req.delay_min)),
+        "delay_max": max(5, int(req.delay_max)),
+    }
+
+    camp_id = create_campaign(camp_data)
+    update_campaign_status(camp_id, "running")
+    log_activity("SUCCESS", "POSTER", f"⚡ Auto-Broadcaster launched: Posting to ALL groups every {req.interval_val} {req.interval_unit}.")
+    return {"success": True, "id": camp_id, "status": "running"}
 
 @app.post("/api/campaigns/{campaign_id}/start")
 def start_campaign(campaign_id: int):

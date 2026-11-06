@@ -221,7 +221,7 @@ class TelegramManager:
             log_activity("ERROR", "POSTER", f"Failed to post to {group_id_or_username}: {str(e)}")
             return {"success": False, "error": str(e)}
 
-    async def scout_target(self, link_or_username: str, keywords: List[str], scan_depth: int = 200) -> Dict[str, Any]:
+    async def scout_target(self, link_or_username: str, keywords: List[str], scan_depth: int = 500) -> Dict[str, Any]:
         client = await self.get_client()
         if not client or not await client.is_user_authorized():
             return {"success": False, "error": "Telegram client is not authorized"}
@@ -232,7 +232,7 @@ class TelegramManager:
         elif target_clean.startswith("t.me/"):
             target_clean = target_clean.replace("t.me/", "")
 
-        log_activity("INFO", "SCOUT", f"Starting scout scan on '{target_clean}' (Depth: {scan_depth} messages)...")
+        log_activity("INFO", "SCOUT", f"Starting deep scout scan on '{target_clean}' for IPTV discussions...")
         
         try:
             # Check if it's an invite link (starts with + or joinchat/)
@@ -249,63 +249,97 @@ class TelegramManager:
             group_title = getattr(entity, 'title', target_clean)
             group_id = entity.id
 
-            # Lowercase keywords for case-insensitive matching
             kw_clean = [k.strip().lower() for k in keywords if k.strip()]
             if not kw_clean:
-                return {"success": False, "error": "No keywords specified for scouting"}
+                kw_clean = [
+                    "iptv", "m3u", "reseller", "smarters", "tivimate", "trial", 
+                    "mag", "xtream", "credits", "supplier", "panel", "subscription", 
+                    "rebrand", "provider", "freeze", "stream"
+                ]
 
             leads_found = 0
-            scanned_count = 0
+            scanned_msg_ids = set()
             new_leads = []
 
-            async for message in client.iter_messages(entity, limit=scan_depth):
-                scanned_count += 1
-                if not message.text:
-                    continue
+            # 1. Server-side keyword search: pulls all historical messages in this group mentioning IPTV keywords
+            for kw in kw_clean:
+                try:
+                    async for message in client.iter_messages(entity, search=kw, limit=100):
+                        if not message or message.id in scanned_msg_ids:
+                            continue
+                        scanned_msg_ids.add(message.id)
+                        if not message.text:
+                            continue
 
-                # Ignore messages from bots or channels themselves if desired
-                sender = await message.get_sender()
-                if not sender or getattr(sender, 'bot', False):
-                    continue
+                        sender = await message.get_sender()
+                        if not sender or getattr(sender, 'bot', False):
+                            continue
 
-                msg_text_lower = message.text.lower()
-                
-                # Check for keyword matches
-                matched_kw = None
-                for kw in kw_clean:
-                    # Match whole words or substrings
-                    if re.search(r'\b' + re.escape(kw) + r'\b', msg_text_lower) or kw in msg_text_lower:
-                        matched_kw = kw
-                        break
+                        lead_dict = {
+                            "user_id": sender.id,
+                            "username": getattr(sender, 'username', None),
+                            "first_name": getattr(sender, 'first_name', '') or "",
+                            "last_name": getattr(sender, 'last_name', '') or "",
+                            "group_id": group_id,
+                            "group_title": group_title,
+                            "message_id": message.id,
+                            "message_text": message.text[:800],
+                            "matched_keyword": kw,
+                            "detected_at": message.date.strftime("%Y-%m-%d %H:%M:%S") if message.date else datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "status": "new"
+                        }
 
-                if matched_kw:
-                    sender_username = getattr(sender, 'username', None)
-                    sender_first = getattr(sender, 'first_name', '') or ""
-                    sender_last = getattr(sender, 'last_name', '') or ""
+                        if add_lead(lead_dict):
+                            leads_found += 1
+                            new_leads.append(lead_dict)
+                except Exception:
+                    pass
 
-                    lead_dict = {
-                        "user_id": sender.id,
-                        "username": sender_username,
-                        "first_name": sender_first,
-                        "last_name": sender_last,
-                        "group_id": group_id,
-                        "group_title": group_title,
-                        "message_id": message.id,
-                        "message_text": message.text[:800],
-                        "matched_keyword": matched_kw,
-                        "detected_at": message.date.strftime("%Y-%m-%d %H:%M:%S") if message.date else datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "status": "new"
-                    }
+            # 2. Recent chronological message scan for any additional variations
+            try:
+                async for message in client.iter_messages(entity, limit=min(scan_depth, 500)):
+                    if not message or message.id in scanned_msg_ids:
+                        continue
+                    scanned_msg_ids.add(message.id)
+                    if not message.text:
+                        continue
 
-                    if add_lead(lead_dict):
-                        leads_found += 1
-                        new_leads.append(lead_dict)
+                    sender = await message.get_sender()
+                    if not sender or getattr(sender, 'bot', False):
+                        continue
 
-            log_activity("SUCCESS", "SCOUT", f"Finished scouting '{group_title}'. Scanned {scanned_count} msgs, discovered {leads_found} IPTV leads!")
+                    msg_text_lower = message.text.lower()
+                    matched_kw = None
+                    for kw in kw_clean:
+                        if re.search(r'\b' + re.escape(kw) + r'\b', msg_text_lower) or kw in msg_text_lower:
+                            matched_kw = kw
+                            break
+
+                    if matched_kw:
+                        lead_dict = {
+                            "user_id": sender.id,
+                            "username": getattr(sender, 'username', None),
+                            "first_name": getattr(sender, 'first_name', '') or "",
+                            "last_name": getattr(sender, 'last_name', '') or "",
+                            "group_id": group_id,
+                            "group_title": group_title,
+                            "message_id": message.id,
+                            "message_text": message.text[:800],
+                            "matched_keyword": matched_kw,
+                            "detected_at": message.date.strftime("%Y-%m-%d %H:%M:%S") if message.date else datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "status": "new"
+                        }
+                        if add_lead(lead_dict):
+                            leads_found += 1
+                            new_leads.append(lead_dict)
+            except Exception:
+                pass
+
+            log_activity("SUCCESS", "SCOUT", f"Finished scouting '{group_title}'. Found {leads_found} members talking about IPTV ({len(scanned_msg_ids)} messages inspected)!")
             return {
                 "success": True,
                 "group_title": group_title,
-                "scanned_count": scanned_count,
+                "scanned_count": len(scanned_msg_ids),
                 "leads_found": leads_found,
                 "leads": new_leads
             }

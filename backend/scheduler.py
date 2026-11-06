@@ -6,7 +6,7 @@ from typing import Dict, Any, Optional
 
 from backend.database import (
     get_connection, get_campaigns, update_campaign_status, 
-    increment_campaign_posts, get_template, log_activity
+    increment_campaign_posts, get_template, get_templates, log_activity
 )
 from backend.telegram_client import TelegramManager
 
@@ -39,13 +39,13 @@ class CampaignScheduler:
 
     def calculate_next_run(self, interval_val: int, interval_unit: str) -> datetime:
         now = datetime.now()
-        unit = interval_unit.lower()
+        unit = (interval_unit or "minutes").lower()
         if "sec" in unit:
-            return now + timedelta(seconds=interval_val)
+            return now + timedelta(seconds=max(5, int(interval_val)))
         elif "hour" in unit:
-            return now + timedelta(hours=interval_val)
+            return now + timedelta(hours=max(1, int(interval_val)))
         else: # default minutes
-            return now + timedelta(minutes=interval_val)
+            return now + timedelta(minutes=max(1, int(interval_val)))
 
     async def _scheduler_loop(self):
         tg = TelegramManager.get_instance()
@@ -55,10 +55,10 @@ class CampaignScheduler:
                 now = datetime.now()
 
                 for camp in campaigns:
-                    if camp["status"] != "running":
+                    if camp.get("status") != "running":
                         continue
 
-                    next_run_str = camp["next_run"]
+                    next_run_str = camp.get("next_run")
                     should_run = False
                     if not next_run_str:
                         should_run = True
@@ -67,7 +67,7 @@ class CampaignScheduler:
                             next_run_dt = datetime.fromisoformat(next_run_str)
                             if now >= next_run_dt:
                                 should_run = True
-                        except:
+                        except Exception:
                             should_run = True
 
                     if should_run:
@@ -78,38 +78,65 @@ class CampaignScheduler:
             except Exception as e:
                 log_activity("ERROR", "SCHEDULER", f"Error in scheduler loop: {str(e)}")
 
-            await asyncio.sleep(5) # Check every 5 seconds
+            # Check every second for responsive second-based intervals
+            await asyncio.sleep(1)
 
     async def _execute_campaign(self, campaign: dict, tg: TelegramManager):
         camp_id = campaign["id"]
         camp_name = campaign["name"]
 
-        try:
-            template_ids = json.loads(campaign["template_ids"])
-            group_ids = json.loads(campaign["target_group_ids"])
-        except Exception:
-            template_ids = []
-            group_ids = []
-
-        if not template_ids or not group_ids:
-            log_activity("WARNING", "POSTER", f"Campaign '{camp_name}' has no templates or target groups. Stopping.")
-            update_campaign_status(camp_id, "stopped")
-            return
-
         # Check client authorization
         status = await tg.get_status()
-        if not status["is_authorized"]:
+        if not status.get("is_authorized"):
             log_activity("WARNING", "POSTER", f"Telegram not logged in. Cannot run campaign '{camp_name}'.")
             return
 
+        try:
+            template_ids = json.loads(campaign.get("template_ids", "[]"))
+        except Exception:
+            template_ids = []
+
+        try:
+            target_groups_raw = json.loads(campaign.get("target_group_ids", "[]"))
+        except Exception:
+            target_groups_raw = []
+
+        # If templates empty or set to 'all', use all available templates
+        if not template_ids or template_ids == ["all"]:
+            all_templates = get_templates()
+            template_ids = [t["id"] for t in all_templates]
+
+        # If target groups is empty or ["all"], dynamically resolve all joined groups
+        is_all_groups = False
+        if not target_groups_raw or target_groups_raw == ["all"] or "all" in target_groups_raw:
+            is_all_groups = True
+            all_groups = await tg.get_dialogs_and_groups()
+            group_ids = [g["id"] for g in all_groups]
+        else:
+            group_ids = [int(gid) for gid in target_groups_raw if str(gid).isdigit() or (isinstance(gid, int))]
+
+        if not template_ids:
+            log_activity("WARNING", "POSTER", f"Campaign '{camp_name}' has no templates. Please create at least one content template.")
+            update_campaign_status(camp_id, "stopped")
+            return
+
+        if not group_ids:
+            log_activity("WARNING", "POSTER", f"Campaign '{camp_name}' has no target groups found. Make sure your Telegram account is in at least 1 group.")
+            update_campaign_status(camp_id, "stopped")
+            return
+
         now_str = datetime.now().isoformat()
-        next_dt = self.calculate_next_run(campaign["interval_val"], campaign["interval_unit"])
+        next_dt = self.calculate_next_run(campaign.get("interval_val", 30), campaign.get("interval_unit", "minutes"))
         update_campaign_status(camp_id, "running", last_run=now_str, next_run=next_dt.isoformat())
 
-        log_activity("INFO", "POSTER", f"Starting broadcasting round for campaign '{camp_name}' ({len(group_ids)} groups)...")
+        interval_display = f"{campaign.get('interval_val', 30)} {campaign.get('interval_unit', 'minutes')}"
+        scope_display = f"ALL {len(group_ids)} joined groups" if is_all_groups else f"{len(group_ids)} selected groups"
+        log_activity("INFO", "POSTER", f"🚀 Starting broadcast round for '{camp_name}' to {scope_display}. Interval: every {interval_display}.")
 
-        delay_min = max(5, int(campaign.get("delay_min", 15)))
-        delay_max = max(delay_min + 5, int(campaign.get("delay_max", 45)))
+        delay_min = max(3, int(campaign.get("delay_min", 10)))
+        delay_max = max(delay_min + 3, int(campaign.get("delay_max", 30)))
+
+        successful_posts = 0
 
         for idx, group_id in enumerate(group_ids):
             # Check if campaign was paused or stopped mid-way
@@ -117,7 +144,7 @@ class CampaignScheduler:
             c_check = conn.execute("SELECT status FROM campaigns WHERE id = ?", (camp_id,)).fetchone()
             conn.close()
             if not c_check or c_check["status"] != "running":
-                log_activity("INFO", "POSTER", f"Campaign '{camp_name}' was paused/stopped by user during broadcasting.")
+                log_activity("INFO", "POSTER", f"Campaign '{camp_name}' was paused or stopped by user during broadcast.")
                 break
 
             # Pick template (rotate or pick random)
@@ -130,15 +157,16 @@ class CampaignScheduler:
             result = await tg.send_post(group_id, content)
 
             if result.get("success"):
+                successful_posts += 1
                 increment_campaign_posts(camp_id)
             elif result.get("flood_wait"):
                 wait_sec = result["flood_wait"] + 5
-                log_activity("WARNING", "POSTER", f"Pausing campaign '{camp_name}' for {wait_sec}s due to Telegram FloodWait")
+                log_activity("WARNING", "POSTER", f"Telegram FloodWait encountered. Pausing for {wait_sec}s...")
                 await asyncio.sleep(wait_sec)
 
-            # Random anti-spam delay between group posts (skip delay on last group)
+            # Anti-spam delay between groups (skip on last group)
             if idx < len(group_ids) - 1:
                 safe_wait = random.randint(delay_min, delay_max)
                 await asyncio.sleep(safe_wait)
 
-        log_activity("SUCCESS", "POSTER", f"Completed round for '{camp_name}'. Next round scheduled at {next_dt.strftime('%H:%M:%S')}")
+        log_activity("SUCCESS", "POSTER", f"✅ Broadcast round finished: {successful_posts}/{len(group_ids)} posts sent. Next round scheduled at {next_dt.strftime('%H:%M:%S')}")

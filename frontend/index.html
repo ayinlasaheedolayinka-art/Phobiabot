@@ -136,7 +136,18 @@
       </div>
 
       <!-- KPI Summary Cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div class="bg-darkCard border border-darkBorder p-5 rounded-2xl relative overflow-hidden">
+          <div class="flex items-center justify-between">
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Telegram Groups</p>
+            <div class="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center">
+              <i class="fa-solid fa-users text-lg"></i>
+            </div>
+          </div>
+          <p id="kpiGroups" class="text-3xl font-extrabold mt-3 text-blue-400">0</p>
+          <p class="text-xs text-slate-400 mt-1">Total joined groups</p>
+        </div>
+
         <div class="bg-darkCard border border-darkBorder p-5 rounded-2xl relative overflow-hidden">
           <div class="flex items-center justify-between">
             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Scouted Leads</p>
@@ -150,18 +161,18 @@
 
         <div class="bg-darkCard border border-darkBorder p-5 rounded-2xl relative overflow-hidden">
           <div class="flex items-center justify-between">
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Posts Broadcasted</p>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Posts Sent</p>
             <div class="w-10 h-10 rounded-xl bg-brand-500/10 text-brand-400 flex items-center justify-center">
               <i class="fa-solid fa-paper-plane text-lg"></i>
             </div>
           </div>
           <p id="kpiPosts" class="text-3xl font-extrabold mt-3">0</p>
-          <p class="text-xs text-slate-400 mt-1">Total messages sent</p>
+          <p class="text-xs text-slate-400 mt-1">Broadcasts delivered</p>
         </div>
 
         <div class="bg-darkCard border border-darkBorder p-5 rounded-2xl relative overflow-hidden">
           <div class="flex items-center justify-between">
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Templates Saved</p>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Templates</p>
             <div class="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center">
               <i class="fa-solid fa-layer-group text-lg"></i>
             </div>
@@ -172,7 +183,7 @@
 
         <div class="bg-darkCard border border-darkBorder p-5 rounded-2xl relative overflow-hidden">
           <div class="flex items-center justify-between">
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Campaigns</p>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Campaign Status</p>
             <div class="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
               <i class="fa-solid fa-clock text-lg"></i>
             </div>
@@ -250,6 +261,136 @@
         <button onclick="openCampaignModal()" class="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-sm shadow-lg shadow-brand-600/30 flex items-center gap-2 transition self-start sm:self-auto">
           <i class="fa-solid fa-plus"></i> New Campaign
         </button>
+      </div>
+
+      <!-- ⚡ ALL-GROUPS AUTO-BROADCASTER HUB -->
+      <div class="bg-gradient-to-br from-slate-900 via-darkCard to-slate-900 border border-brand-500/40 rounded-3xl p-6 shadow-2xl space-y-6">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-darkBorder/60 pb-5">
+          <div class="flex items-center space-x-3.5">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-brand-600 to-cyan-500 flex items-center justify-center text-white text-xl shadow-lg shadow-brand-500/30 flex-shrink-0">
+              <i class="fa-solid fa-tower-broadcast animate-pulse"></i>
+            </div>
+            <div>
+              <h3 class="font-extrabold text-lg text-white">All-Groups Automatic Broadcaster</h3>
+              <p class="text-xs text-slate-400">Automatically posts to every Telegram group you belong to on your schedule with Spintax & anti-flood protection.</p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-3">
+            <div class="px-4 py-2 rounded-xl bg-slate-800/80 border border-darkBorder flex items-center gap-2">
+              <i class="fa-solid fa-users text-brand-400"></i>
+              <span class="text-xs text-slate-300 font-medium">Telegram Groups:</span>
+              <span id="posterTotalGroupsBadge" class="text-xs font-bold text-brand-400 bg-brand-950/60 px-2 py-0.5 rounded-lg border border-brand-800/40">0 Groups</span>
+            </div>
+            <button onclick="loadGroups()" title="Refresh Telegram Groups" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition">
+              <i class="fa-solid fa-rotate-right"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Schedule & Settings Form -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          <!-- Column 1: Schedule Interval (Seconds, Minutes, Hours) -->
+          <div class="space-y-3 bg-slate-900/60 p-4 rounded-2xl border border-darkBorder/70">
+            <label class="block text-xs font-bold text-brand-400 uppercase tracking-wider">
+              <i class="fa-regular fa-clock mr-1"></i> 1. Schedule Posting Interval
+            </label>
+            <p class="text-[11px] text-slate-400">How often should the bot repeat broadcasts to your groups?</p>
+            
+            <div class="flex items-center space-x-2 pt-1">
+              <input type="number" id="quickIntervalVal" value="30" min="5" class="w-24 bg-slate-950 border border-darkBorder rounded-xl px-3 py-2.5 text-base font-bold text-white focus:outline-none focus:border-brand-500" />
+              <select id="quickIntervalUnit" class="flex-1 bg-slate-950 border border-darkBorder rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-200 focus:outline-none focus:border-brand-500">
+                <option value="seconds">Seconds</option>
+                <option value="minutes" selected>Minutes</option>
+                <option value="hours">Hours</option>
+              </select>
+            </div>
+
+            <!-- Quick Presets -->
+            <div class="pt-2">
+              <span class="text-[10px] text-slate-400 uppercase font-semibold">Quick Presets:</span>
+              <div class="flex flex-wrap gap-1.5 mt-1.5">
+                <button type="button" onclick="setQuickInterval(30, 'seconds')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition">⚡ 30s</button>
+                <button type="button" onclick="setQuickInterval(60, 'seconds')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition">⚡ 60s</button>
+                <button type="button" onclick="setQuickInterval(5, 'minutes')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition">⏱️ 5m</button>
+                <button type="button" onclick="setQuickInterval(15, 'minutes')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition">⏱️ 15m</button>
+                <button type="button" onclick="setQuickInterval(1, 'hours')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition">🕐 1hr</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Column 2: Target Groups & Templates -->
+          <div class="space-y-3 bg-slate-900/60 p-4 rounded-2xl border border-darkBorder/70">
+            <label class="block text-xs font-bold text-cyan-400 uppercase tracking-wider">
+              <i class="fa-solid fa-bullseye mr-1"></i> 2. Target Scope & Content
+            </label>
+
+            <!-- Target Selection -->
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Target Telegram Groups:</label>
+              <div class="p-2.5 rounded-xl bg-brand-950/40 border border-brand-800/40 text-xs text-brand-300 font-medium flex items-center gap-2">
+                <i class="fa-solid fa-circle-check text-brand-400 text-sm"></i>
+                <span>Auto-Post to <strong>ALL <span id="quickTargetCountText">0</span> joined groups</strong> automatically</span>
+              </div>
+            </div>
+
+            <!-- Template Selector -->
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Marketing Content:</label>
+              <select id="quickTemplateSelect" class="w-full bg-slate-950 border border-darkBorder rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+                <option value="all">🔄 Rotate Across All Saved Templates (Spintax)</option>
+              </select>
+            </div>
+
+            <!-- Anti-Ban Safe Delay -->
+            <div>
+              <label class="text-[11px] text-slate-400 block mb-1">Anti-Ban Random Delay between groups:</label>
+              <div class="flex items-center space-x-2 text-xs text-slate-300 font-mono">
+                <input type="number" id="quickDelayMin" value="10" min="3" class="w-16 bg-slate-950 border border-darkBorder rounded-xl px-2 py-1.5 text-center text-xs text-white" />
+                <span>to</span>
+                <input type="number" id="quickDelayMax" value="30" min="5" class="w-16 bg-slate-950 border border-darkBorder rounded-xl px-2 py-1.5 text-center text-xs text-white" />
+                <span class="text-slate-400">sec (safe jitter)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Column 3: Status & Big Action Button -->
+          <div class="space-y-4 bg-slate-900/60 p-4 rounded-2xl border border-darkBorder/70 flex flex-col justify-between">
+            <div>
+              <label class="block text-xs font-bold text-amber-400 uppercase tracking-wider mb-2">
+                <i class="fa-solid fa-power-off mr-1"></i> 3. Auto-Poster Engine Status
+              </label>
+              <div id="quickBroadcastStatusBox" class="p-3.5 rounded-xl bg-slate-950 border border-darkBorder text-xs space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="text-slate-400">Current Status:</span>
+                  <span id="quickCampStatusBadge" class="font-bold text-slate-300 bg-slate-800 px-2.5 py-0.5 rounded-full uppercase text-[10px]">IDLE</span>
+                </div>
+                <div class="flex items-center justify-between pt-1">
+                  <span class="text-slate-400">Total Posts Broadcasted:</span>
+                  <span id="quickCampPostsCount" class="font-bold text-white">0</span>
+                </div>
+                <div class="flex items-center justify-between pt-1">
+                  <span class="text-slate-400">Next Scheduled Run:</span>
+                  <span id="quickCampNextRun" class="font-mono text-[11px] text-brand-400">None</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="space-y-2 pt-2">
+              <button id="btnQuickStartBroadcast" onclick="startQuickBroadcast()" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-brand-600 via-emerald-500 to-teal-600 hover:from-brand-500 hover:to-teal-500 text-white font-extrabold text-sm tracking-wide shadow-xl shadow-brand-600/30 flex items-center justify-center gap-2.5 transition transform active:scale-[0.99]">
+                <i class="fa-solid fa-play"></i> START AUTO-POSTING TO ALL GROUPS
+              </button>
+              <div class="grid grid-cols-2 gap-2">
+                <button onclick="pauseQuickBroadcast()" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5">
+                  <i class="fa-solid fa-pause"></i> Pause
+                </button>
+                <button onclick="stopQuickBroadcast()" class="py-2 rounded-xl bg-red-950/40 border border-red-800/40 hover:bg-red-900/50 text-red-300 text-xs font-bold transition flex items-center justify-center gap-1.5">
+                  <i class="fa-solid fa-stop"></i> Stop
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Active Campaigns List -->
@@ -347,20 +488,39 @@
           <!-- Scan Depth -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
             <div>
-              <label class="block text-xs font-semibold text-slate-400 mb-1.5">Scan Depth (Past Messages per Group)</label>
+              <label class="block text-xs font-semibold text-slate-400 mb-1.5">Scan Mode (Full History + Messages)</label>
               <select id="scoutDepthSelect" class="w-full bg-slate-900 border border-darkBorder rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-brand-500">
-                <option value="100">Quick Scan (Last 100 messages)</option>
-                <option value="300" selected>Standard Scan (Last 300 messages)</option>
-                <option value="500">Deep Scan (Last 500 messages)</option>
-                <option value="1000">Thorough Scan (Last 1,000 messages)</option>
+                <option value="300">Standard Scan (Keywords Search + 300 messages)</option>
+                <option value="500" selected>Deep Scan (Keywords Search + 500 messages)</option>
+                <option value="1000">Thorough Scan (Keywords Search + 1,000 messages)</option>
+                <option value="2000">Maximum Scan (Keywords Search + 2,000 messages)</option>
               </select>
             </div>
             <div class="flex items-end">
               <button onclick="runScoutScan()" id="btnStartScout" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-cyan-600 hover:from-brand-500 hover:to-cyan-500 text-white font-bold text-sm shadow-lg shadow-brand-500/20 flex items-center justify-center gap-2 transition">
-                <i class="fa-solid fa-crosshairs"></i> Launch Scout Scanner
+                <i class="fa-solid fa-magnifying-glass-plus"></i> Scout All Members Talking About IPTV
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Discovered Members In Group (Live Results Preview) -->
+      <div id="scoutResultsBox" class="hidden bg-darkCard border border-brand-500/30 rounded-2xl p-6 space-y-4">
+        <div class="flex items-center justify-between border-b border-darkBorder pb-3">
+          <div class="flex items-center space-x-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-brand-400 animate-pulse"></span>
+            <h4 class="font-bold text-base text-white">Discovered Members Talking About IPTV in this Group</h4>
+          </div>
+          <span id="scoutFoundBadge" class="px-3 py-1 rounded-full bg-brand-950/70 border border-brand-800 text-xs font-bold text-brand-300">0 Leads</span>
+        </div>
+        <div id="scoutResultsList" class="space-y-3 max-h-96 overflow-y-auto">
+          <!-- Rendered dynamically -->
+        </div>
+        <div class="flex justify-end pt-2">
+          <button onclick="switchTab('tab-leads')" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold flex items-center gap-2">
+            <span>View & Export All Leads</span> <i class="fa-solid fa-arrow-right"></i>
+          </button>
         </div>
       </div>
     </section>
