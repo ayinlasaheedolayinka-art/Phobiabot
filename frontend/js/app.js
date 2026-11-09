@@ -197,6 +197,14 @@ async function checkStatus() {
       const savedSession = localStorage.getItem('TG_SESSION_STRING');
       if (savedSession && !state._isRestoringSession) {
         state._isRestoringSession = true;
+        if (unauthAlert) unauthAlert.classList.add('hidden');
+        sidebarDot.className = 'w-3 h-3 rounded-full bg-cyan-400 animate-pulse';
+        sidebarName.innerText = 'Reconnecting...';
+        sidebarSub.innerText = 'Restoring session';
+        setupDot.className = 'w-3.5 h-3.5 rounded-full bg-cyan-400 animate-pulse';
+        setupTitle.innerText = 'Reconnecting';
+        setupDesc.innerText = 'Restoring your Telegram session...';
+
         fetch('/api/auth/restore-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -210,9 +218,18 @@ async function checkStatus() {
           if (resData.success) {
             checkStatus();
             loadGroups();
+          } else {
+            if (unauthAlert) unauthAlert.classList.remove('hidden');
+            sidebarDot.className = 'w-3 h-3 rounded-full bg-amber-500';
+            sidebarName.innerText = 'Not Connected';
+            sidebarSub.innerText = 'Connect Telegram';
+            setupDot.className = 'w-3.5 h-3.5 rounded-full bg-slate-500';
+            setupTitle.innerText = 'Disconnected';
+            setupDesc.innerText = 'Enter your Telegram credentials below to sign in.';
           }
         }).catch(e => {
           console.warn('Auto restore failed:', e);
+          if (unauthAlert) unauthAlert.classList.remove('hidden');
         }).finally(() => {
           setTimeout(() => { state._isRestoringSession = false; }, 8000);
         });
@@ -298,6 +315,13 @@ async function handleVerifyCode(e) {
       if (data.session_string) {
         localStorage.setItem('TG_SESSION_STRING', data.session_string);
       }
+      const curApiId = document.getElementById('apiIdInput')?.value || localStorage.getItem('TG_API_ID');
+      const curApiHash = document.getElementById('apiHashInput')?.value || localStorage.getItem('TG_API_HASH');
+      const curPhone = document.getElementById('phoneInput')?.value || localStorage.getItem('TG_PHONE');
+      if (curApiId) localStorage.setItem('TG_API_ID', curApiId);
+      if (curApiHash) localStorage.setItem('TG_API_HASH', curApiHash);
+      if (curPhone) localStorage.setItem('TG_PHONE', curPhone);
+
       closeModal('otpModal');
       showNotification(`Successfully logged into Telegram! Permanent session saved.`, 'success');
       await checkStatus();

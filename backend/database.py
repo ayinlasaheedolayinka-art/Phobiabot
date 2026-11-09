@@ -9,6 +9,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "scout_bot.db")
 TEMPLATES_JSON_PATH = os.path.join(DATA_DIR, "templates.json")
 CAMPAIGNS_JSON_PATH = os.path.join(DATA_DIR, "campaigns.json")
+SETTINGS_JSON_PATH = os.path.join(DATA_DIR, "settings.json")
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -103,6 +104,33 @@ def _export_campaigns_internal(cursor):
             json.dump(rows, f, indent=2, ensure_ascii=False)
     except Exception as e:
         print(f"Error exporting campaigns: {e}")
+
+def _restore_settings_internal(cursor) -> int:
+    if not os.path.exists(SETTINGS_JSON_PATH):
+        return 0
+    try:
+        with open(SETTINGS_JSON_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return 0
+        count = 0
+        for k, v in data.items():
+            if v is not None and str(v).strip():
+                cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, str(v)))
+                count += 1
+        return count
+    except Exception as e:
+        print(f"Error restoring settings: {e}")
+        return 0
+
+def _export_settings_internal(cursor):
+    try:
+        cursor.execute("SELECT key, value FROM settings")
+        data = {r["key"]: r["value"] for r in cursor.fetchall()}
+        with open(SETTINGS_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error exporting settings: {e}")
 
 def init_db():
     conn = get_connection()
@@ -224,6 +252,10 @@ def init_db():
     if cursor.fetchone()["count"] == 0:
         _restore_campaigns_internal(cursor)
         conn.commit()
+
+    # Restore settings from persistent file
+    _restore_settings_internal(cursor)
+    conn.commit()
 
     # Pre-populate default IPTV keywords if not set
     cursor.execute("SELECT value FROM settings WHERE key = 'scout_keywords'")
@@ -445,6 +477,7 @@ def set_setting(key: str, value: Any):
     cursor = conn.cursor()
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
     conn.commit()
+    _export_settings_internal(cursor)
     conn.close()
 
 # Campaign helpers

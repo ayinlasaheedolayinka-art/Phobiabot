@@ -16,6 +16,7 @@ class CampaignScheduler:
     def __init__(self):
         self.running: bool = False
         self._task: Optional[asyncio.Task] = None
+        self._keep_alive_task: Optional[asyncio.Task] = None
         self.current_execution_info: Dict[str, Any] = {}
 
     @classmethod
@@ -28,13 +29,17 @@ class CampaignScheduler:
         if not self.running:
             self.running = True
             self._task = asyncio.create_task(self._scheduler_loop())
-            log_activity("INFO", "SCHEDULER", "Campaign scheduler background loop started")
+            self._keep_alive_task = asyncio.create_task(self._keep_alive_loop())
+            log_activity("INFO", "SCHEDULER", "Campaign scheduler & keep-alive loop started")
 
     def stop_loop(self):
         self.running = False
         if self._task:
             self._task.cancel()
             self._task = None
+        if self._keep_alive_task:
+            self._keep_alive_task.cancel()
+            self._keep_alive_task = None
         log_activity("INFO", "SCHEDULER", "Campaign scheduler background loop stopped")
 
     def calculate_next_run(self, interval_val: int, interval_unit: str) -> datetime:
@@ -84,6 +89,17 @@ class CampaignScheduler:
 
             # Check every second for responsive second-based intervals
             await asyncio.sleep(1)
+
+    async def _keep_alive_loop(self):
+        while self.running:
+            try:
+                await asyncio.sleep(240)  # Every 4 minutes (Render sleeps after 15m idle)
+                import urllib.request
+                urllib.request.urlopen("https://phobiabot.onrender.com/api/status", timeout=15)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
 
     async def _ping_keep_alive(self):
         try:
