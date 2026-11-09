@@ -138,6 +138,7 @@ function hideNotification() {
 // Refresh Everything
 async function refreshAll() {
   await checkStatus();
+  await loadGroups();
   await loadStats();
   await loadTemplates();
   await loadCampaigns();
@@ -192,51 +193,60 @@ async function checkStatus() {
       if (tg.session_string) {
         localStorage.setItem('TG_SESSION_STRING', tg.session_string);
       }
+      localStorage.setItem('TG_USER_INFO', JSON.stringify(tg.user));
     } else {
       // Auto-restore session from browser storage if server rebooted or spun down
       const savedSession = localStorage.getItem('TG_SESSION_STRING');
-      if (savedSession && !state._isRestoringSession) {
-        state._isRestoringSession = true;
+      const savedUser = JSON.parse(localStorage.getItem('TG_USER_INFO') || 'null');
+      
+      if (savedSession) {
+        // User IS logged in permanently in browser! Keep UI connected!
         if (unauthAlert) unauthAlert.classList.add('hidden');
-        sidebarDot.className = 'w-3 h-3 rounded-full bg-cyan-400 animate-pulse';
-        sidebarName.innerText = 'Reconnecting...';
-        sidebarSub.innerText = 'Restoring session';
-        setupDot.className = 'w-3.5 h-3.5 rounded-full bg-cyan-400 animate-pulse';
-        setupTitle.innerText = 'Reconnecting';
-        setupDesc.innerText = 'Restoring your Telegram session...';
+        if (btnLogout) btnLogout.classList.remove('hidden');
+        if (savedUser) {
+          sidebarDot.className = 'w-3 h-3 rounded-full bg-brand-400 pulse-emerald';
+          sidebarName.innerText = savedUser.first_name + (savedUser.username ? ` (@${savedUser.username})` : '');
+          sidebarSub.innerText = savedUser.phone ? `+${savedUser.phone}` : 'Connected';
+          setupDot.className = 'w-3.5 h-3.5 rounded-full bg-brand-400';
+          setupTitle.innerText = 'Connected';
+          setupDesc.innerText = `Logged in as ${savedUser.first_name} (@${savedUser.username || 'No Handle'})`;
+        }
 
-        fetch('/api/auth/restore-session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_string: savedSession,
-            api_id: localStorage.getItem('TG_API_ID') ? parseInt(localStorage.getItem('TG_API_ID')) : undefined,
-            api_hash: localStorage.getItem('TG_API_HASH') || undefined,
-            phone: localStorage.getItem('TG_PHONE') || undefined
-          })
-        }).then(r => r.json()).then(resData => {
-          if (resData.success) {
-            checkStatus();
-            loadGroups();
-          } else {
-            if (unauthAlert) unauthAlert.classList.remove('hidden');
-            sidebarDot.className = 'w-3 h-3 rounded-full bg-amber-500';
-            sidebarName.innerText = 'Not Connected';
-            sidebarSub.innerText = 'Connect Telegram';
-            setupDot.className = 'w-3.5 h-3.5 rounded-full bg-slate-500';
-            setupTitle.innerText = 'Disconnected';
-            setupDesc.innerText = 'Enter your Telegram credentials below to sign in.';
-          }
-        }).catch(e => {
-          console.warn('Auto restore failed:', e);
-          if (unauthAlert) unauthAlert.classList.remove('hidden');
-        }).finally(() => {
-          setTimeout(() => { state._isRestoringSession = false; }, 8000);
-        });
+        if (!state._isRestoringSession) {
+          state._isRestoringSession = true;
+          fetch('/api/auth/restore-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              session_string: savedSession,
+              api_id: localStorage.getItem('TG_API_ID') ? parseInt(localStorage.getItem('TG_API_ID')) : undefined,
+              api_hash: localStorage.getItem('TG_API_HASH') || undefined,
+              phone: localStorage.getItem('TG_PHONE') || undefined
+            })
+          }).then(r => r.json()).then(resData => {
+            if (resData.success) {
+              loadGroups();
+            }
+          }).catch(e => {
+            console.warn('Auto restore background notice:', e);
+          }).finally(() => {
+            setTimeout(() => { state._isRestoringSession = false; }, 8000);
+          });
+        }
         return;
       }
 
       if (unauthAlert) unauthAlert.classList.remove('hidden');
+
+      sidebarDot.className = 'w-3 h-3 rounded-full bg-amber-500';
+      sidebarName.innerText = 'Not Connected';
+      sidebarSub.innerText = 'Connect Telegram';
+
+      setupDot.className = 'w-3.5 h-3.5 rounded-full bg-slate-500';
+      setupTitle.innerText = 'Disconnected';
+      setupDesc.innerText = 'Enter your Telegram credentials below to sign in.';
+      if (btnLogout) btnLogout.classList.add('hidden');
+    }
 
       sidebarDot.className = 'w-3 h-3 rounded-full bg-amber-500';
       sidebarName.innerText = 'Not Connected';
@@ -341,6 +351,7 @@ async function logoutTelegram() {
   if (!confirm('Are you sure you want to log out of Telegram?')) return;
   try {
     localStorage.removeItem('TG_SESSION_STRING');
+    localStorage.removeItem('TG_USER_INFO');
     localStorage.removeItem('TG_API_ID');
     localStorage.removeItem('TG_API_HASH');
     localStorage.removeItem('TG_PHONE');

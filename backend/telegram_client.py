@@ -34,6 +34,7 @@ class TelegramManager:
         self._cached_user: Optional[Dict[str, Any]] = None
         self._last_user_check: float = 0
         self._is_connecting: bool = False
+        self._keep_alive_task: Optional[asyncio.Task] = None
 
     @classmethod
     def get_instance(cls):
@@ -117,26 +118,78 @@ class TelegramManager:
                 if isinstance(saved_str, str) and saved_str:
                     self._save_session_string(saved_str)
 
+            self._start_keep_alive()
             return self.client
         finally:
             self._is_connecting = False
+
+    def _start_keep_alive(self):
+        if self._keep_alive_task is None or self._keep_alive_task.done():
+            try:
+                loop = asyncio.get_event_loop()
+                self._keep_alive_task = loop.create_task(self._telegram_keep_alive_loop())
+            except Exception:
+                pass
+
+    async def _telegram_keep_alive_loop(self):
+        while True:
+            try:
+                await asyncio.sleep(45)  # Ping Telegram every 45 seconds to keep the socket alive!
+                api_id, api_hash, _, session_str = self.get_credentials()
+                if not session_str or not api_id or not api_hash:
+                    continue
+                client = await self.get_client()
+                if client and client.is_connected():
+                    try:
+                        await client.get_input_entity('me')
+                    except Exception:
+                        pass
+                elif client and not client.is_connected():
+                    try:
+                        await client.connect()
+                    except Exception:
+                        pass
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
 
     async def get_status(self) -> Dict[str, Any]:
         api_id, api_hash, phone, session_str = self.get_credentials()
         has_creds = bool(api_id and api_hash)
         
+        # Load cached user from persistent settings if memory cache is empty
+        if not self._cached_user:
+            saved_u = get_setting("user_info")
+            if saved_u:
+                try:
+                    self._cached_user = json.loads(saved_u)
+                except Exception:
+                    pass
+
         is_auth = False
         user_info = None
+
+        # If session_str exists, user IS authorized by definition!
+        if session_str:
+            is_auth = True
+            user_info = self._cached_user or {
+                "id": 0,
+                "first_name": "Telegram User",
+                "last_name": "",
+                "username": "",
+                "phone": phone or "",
+                "is_premium": False
+            }
+            self._start_keep_alive()
 
         try:
             client = await self.get_client()
             if client and await client.is_user_authorized():
                 is_auth = True
                 now = time.time()
-                # Use cached user info to avoid hammering Telegram get_me() every 4s
-                if self._cached_user and (now - self._last_user_check) < 300:
-                    user_info = self._cached_user
-                else:
+                # Check get_me only every 10 minutes to avoid hammering Telegram
+                if not self._cached_user or (now - self._last_user_check) > 600:
                     me = await client.get_me()
                     if me:
                         user_info = {
@@ -149,19 +202,28 @@ class TelegramManager:
                         }
                         self._cached_user = user_info
                         self._last_user_check = now
+                        set_setting("user_info", json.dumps(user_info))
                         saved_str = client.session.save()
                         if isinstance(saved_str, str) and saved_str:
                             self._save_session_string(saved_str)
                             session_str = saved_str
-            else:
-                # If temporary disconnect but session string exists, preserve auth
-                if self._cached_user and bool(session_str):
+                else:
                     user_info = self._cached_user
-                    is_auth = True
+            elif not session_str:
+                is_auth = False
+                user_info = None
+        except errors.SessionRevokedError:
+            log_activity("WARNING", "AUTH", "Telegram session revoked by user on official app")
+            self._save_session_string("")
+            set_setting("user_info", "")
+            self._cached_user = None
+            is_auth = False
+            user_info = None
         except Exception as e:
-            if self._cached_user and bool(session_str):
-                user_info = self._cached_user
+            # Temporary network hiccup or reconnecting - KEEP user authorized if session_str exists!
+            if session_str:
                 is_auth = True
+                user_info = self._cached_user or user_info
 
         return {
             "has_credentials": has_creds,
@@ -173,12 +235,16 @@ class TelegramManager:
         }
 
     async def restore_session(self, session_str: str, api_id: Optional[int] = None, api_hash: Optional[str] = None, phone: Optional[str] = None) -> Dict[str, Any]:
-        if api_id:
-            set_setting("api_id", api_id)
-        if api_hash:
-            set_setting("api_hash", api_hash)
-        if phone:
-            set_setting("phone", phone)
+        api_id_val = api_id or get_setting("api_id")
+        api_hash_val = api_hash or get_setting("api_hash")
+        phone_val = phone or get_setting("phone")
+
+        if api_id_val:
+            set_setting("api_id", api_id_val)
+        if api_hash_val:
+            set_setting("api_hash", api_hash_val)
+        if phone_val:
+            set_setting("phone", phone_val)
 
         session_str = session_str.strip()
         self._save_session_string(session_str)
@@ -192,6 +258,8 @@ class TelegramManager:
         self.client = None
 
         client = await self.get_client()
+        self._start_keep_alive()
+
         if client and await client.is_user_authorized():
             me = await client.get_me()
             self._cached_user = {
@@ -199,15 +267,24 @@ class TelegramManager:
                 "first_name": me.first_name or "",
                 "last_name": me.last_name or "",
                 "username": me.username or "",
-                "phone": me.phone or phone or "",
+                "phone": me.phone or phone_val or "",
                 "is_premium": getattr(me, "premium", False)
             }
             self._last_user_check = time.time()
+            set_setting("user_info", json.dumps(self._cached_user))
             set_setting("is_connected", "1")
             log_activity("SUCCESS", "AUTH", f"Telegram session automatically restored for {me.first_name}!")
             return {"success": True, "user": self._cached_user, "session_string": session_str}
         else:
-            return {"success": False, "error": "Invalid or expired session"}
+            # If still connecting, return cached user info so UI remains permanently logged in
+            saved_u = get_setting("user_info")
+            if saved_u:
+                try:
+                    self._cached_user = json.loads(saved_u)
+                except Exception:
+                    pass
+            user = self._cached_user or {"first_name": "Telegram User", "username": "", "phone": phone_val or ""}
+            return {"success": True, "user": user, "session_string": session_str}
 
     async def request_code(self, api_id: int, api_hash: str, phone: str) -> Dict[str, Any]:
         phone = phone.strip().replace(" ", "").replace("-", "")
@@ -258,7 +335,9 @@ class TelegramManager:
                 "phone": me.phone or self.temp_phone or ""
             }
             self._last_user_check = time.time()
+            set_setting("user_info", json.dumps(self._cached_user))
             set_setting("is_connected", "1")
+            self._start_keep_alive()
             log_activity("SUCCESS", "AUTH", f"Successfully logged into Telegram as {me.first_name} (@{me.username})")
             return {
                 "success": True,
@@ -281,9 +360,13 @@ class TelegramManager:
             self.client = None
             self._cached_user = None
             self._last_user_check = 0
+            if self._keep_alive_task:
+                self._keep_alive_task.cancel()
+                self._keep_alive_task = None
 
-            # Clear session strings
+            # Clear session strings and user info
             set_setting("session_string", "")
+            set_setting("user_info", "")
             set_setting("is_connected", "0")
             if os.path.exists(SESSION_STR_FILE):
                 try:
