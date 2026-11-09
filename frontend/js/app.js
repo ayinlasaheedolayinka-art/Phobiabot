@@ -39,6 +39,18 @@ const state = {
 // Initialization on DOM Ready
 document.addEventListener('DOMContentLoaded', async () => {
   setupNavigation();
+
+  // Auto-fill credential fields from browser storage if present
+  const savedApiId = localStorage.getItem('TG_API_ID');
+  const savedApiHash = localStorage.getItem('TG_API_HASH');
+  const savedPhone = localStorage.getItem('TG_PHONE');
+  const apiIdEl = document.getElementById('apiIdInput');
+  const apiHashEl = document.getElementById('apiHashInput');
+  const phoneEl = document.getElementById('phoneInput');
+  if (savedApiId && apiIdEl) apiIdEl.value = savedApiId;
+  if (savedApiHash && apiHashEl) apiHashEl.value = savedApiHash;
+  if (savedPhone && phoneEl) phoneEl.value = savedPhone;
+
   await refreshAll();
   
   // Background polling for logs and stats every 4 seconds
@@ -319,15 +331,76 @@ async function logoutTelegram() {
   }
 }
 
-// ----------------- TEMPLATES -----------------
+// ----------------- TEMPLATES WITH INDESTRUCTIBLE MULTI-TIER PERSISTENCE -----------------
+const TEMPLATES_STORAGE_KEY = 'PHOBIA_USER_TEMPLATES_BACKUP';
+
 async function loadTemplates() {
   try {
     const res = await fetch('/api/templates');
-    state.templates = await res.json();
+    const serverTemplates = await res.json();
+    
+    // Read local browser backup
+    let localBackup = [];
+    try {
+      localBackup = JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || '[]');
+    } catch (e) {
+      localBackup = [];
+    }
+
+    // Check if any template from browser local backup is missing on the server
+    // (This happens if Render restarted and wiped its ephemeral container disk)
+    const serverNames = new Set(serverTemplates.map(t => (t.name || '').trim().toLowerCase()));
+    const missingOnServer = localBackup.filter(lt => {
+      const name = (lt.name || '').trim().toLowerCase();
+      return name && !serverNames.has(name);
+    });
+
+    if (missingOnServer.length > 0) {
+      console.log(`[Templates] Restoring ${missingOnServer.length} user templates to server...`);
+      try {
+        const syncRes = await fetch('/api/templates/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ templates: localBackup })
+        });
+        const syncData = await syncRes.json();
+        if (syncData.success && syncData.templates) {
+          state.templates = syncData.templates;
+          localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(state.templates));
+          renderTemplatesList();
+          renderTemplatePickers();
+          return;
+        }
+      } catch (syncErr) {
+        console.warn('Auto-sync error:', syncErr);
+      }
+    }
+
+    // Update state and refresh local backup with server templates
+    state.templates = serverTemplates;
+    if (serverTemplates.length > 0) {
+      // Merge with any unique local templates so nothing is lost
+      const merged = [...serverTemplates];
+      for (const lt of localBackup) {
+        if (!merged.some(m => (m.name || '').trim().toLowerCase() === (lt.name || '').trim().toLowerCase())) {
+          merged.push(lt);
+        }
+      }
+      localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(merged));
+    }
+    
     renderTemplatesList();
     renderTemplatePickers();
   } catch (err) {
-    console.error('Failed to load templates:', err);
+    console.error('Failed to load templates from server, falling back to local storage:', err);
+    try {
+      const localBackup = JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || '[]');
+      if (localBackup.length > 0) {
+        state.templates = localBackup;
+        renderTemplatesList();
+        renderTemplatePickers();
+      }
+    } catch (e) {}
   }
 }
 
@@ -453,12 +526,32 @@ async function previewSpintaxDirect(templateId) {
 
 async function saveTemplate() {
   const editId = document.getElementById('editTemplateId').value;
-  const name = document.getElementById('tplNameInput').value;
-  const content = document.getElementById('tplContentInput').value;
+  const name = document.getElementById('tplNameInput').value.trim();
+  const content = document.getElementById('tplContentInput').value.trim();
 
-  if (!name.trim() || !content.trim()) {
+  if (!name || !content) {
     showNotification('Template name and content are required', 'warning');
     return;
+  }
+
+  // Tier 1: Immediately save to browser localStorage so it's NEVER lost
+  try {
+    let localBackup = JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || '[]');
+    if (editId) {
+      const idx = localBackup.findIndex(t => String(t.id) === String(editId) || (t.name || '').toLowerCase() === name.toLowerCase());
+      if (idx >= 0) {
+        localBackup[idx].name = name;
+        localBackup[idx].content = content;
+        localBackup[idx].updated_at = new Date().toISOString();
+      } else {
+        localBackup.push({ name, content, updated_at: new Date().toISOString() });
+      }
+    } else {
+      localBackup.push({ name, content, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    }
+    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(localBackup));
+  } catch (e) {
+    console.warn('LocalStorage save warning:', e);
   }
 
   const url = editId ? `/api/templates/${editId}` : '/api/templates';
@@ -472,20 +565,46 @@ async function saveTemplate() {
     });
     if (res.ok) {
       closeModal('templateModal');
-      showNotification(`Template ${editId ? 'updated' : 'created'} successfully!`, 'success');
+      showNotification(`Template "${name}" saved and permanently preserved!`, 'success');
       await loadTemplates();
       await loadStats();
     } else {
-      const err = await res.json();
-      showNotification(err.detail || 'Failed to save template', 'error');
+      // If direct route failed, fallback to auto-sync endpoint
+      const syncRes = await fetch('/api/templates/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templates: [{ name, content }]
+        })
+      });
+      if (syncRes.ok) {
+        closeModal('templateModal');
+        showNotification(`Template "${name}" saved and synced permanently!`, 'success');
+        await loadTemplates();
+      } else {
+        const err = await res.json();
+        showNotification(err.detail || 'Failed to save template', 'error');
+      }
     }
   } catch (err) {
-    showNotification(err.message, 'error');
+    closeModal('templateModal');
+    showNotification(`Template "${name}" saved to browser backup! Will sync to server when connected.`, 'info');
+    await loadTemplates();
   }
 }
 
 async function deleteTemplateItem(id) {
-  if (!confirm('Are you sure you want to delete this template?')) return;
+  const t = state.templates.find(item => item.id === id);
+  const tName = t ? t.name : 'this template';
+  if (!confirm(`Are you sure you want to delete "${tName}"?`)) return;
+
+  // Remove from localStorage
+  try {
+    let localBackup = JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || '[]');
+    localBackup = localBackup.filter(item => item.id !== id && (item.name || '').toLowerCase() !== (tName || '').toLowerCase());
+    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(localBackup));
+  } catch (e) {}
+
   try {
     const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
     if (res.ok) {
@@ -496,6 +615,59 @@ async function deleteTemplateItem(id) {
   } catch (err) {
     showNotification(err.message, 'error');
   }
+}
+
+function exportTemplatesBackup() {
+  const templates = state.templates.length > 0 ? state.templates : JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || '[]');
+  if (templates.length === 0) {
+    showNotification('No templates found to export', 'warning');
+    return;
+  }
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(templates, null, 2));
+  const downloadAnchor = document.createElement('a');
+  downloadAnchor.setAttribute("href", dataStr);
+  downloadAnchor.setAttribute("download", `phobiabot_templates_backup_${new Date().toISOString().slice(0,10)}.json`);
+  document.body.appendChild(downloadAnchor);
+  downloadAnchor.click();
+  downloadAnchor.remove();
+  showNotification('Templates exported to JSON file successfully!', 'success');
+}
+
+function triggerImportTemplates() {
+  const input = document.getElementById('importTemplatesInput');
+  if (input) input.click();
+}
+
+async function handleImportTemplates(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const imported = JSON.parse(e.target.result);
+      if (!Array.isArray(imported)) {
+        showNotification('Invalid file format. Expected a JSON array of templates.', 'error');
+        return;
+      }
+      const syncRes = await fetch('/api/templates/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templates: imported })
+      });
+      const data = await syncRes.json();
+      if (data.success) {
+        showNotification(`Successfully imported and restored ${imported.length} templates!`, 'success');
+        await loadTemplates();
+      } else {
+        showNotification('Import failed on server', 'error');
+      }
+    } catch (err) {
+      showNotification('Error reading template backup file: ' + err.message, 'error');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
 }
 
 // ----------------- GROUPS -----------------

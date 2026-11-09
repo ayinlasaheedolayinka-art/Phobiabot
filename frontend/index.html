@@ -228,12 +228,26 @@
     <section id="tab-templates" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 class="text-2xl md:text-3xl font-extrabold tracking-tight">Content Templates</h2>
-          <p class="text-sm text-slate-400">Create content with Spintax syntax <code>{Option A|Option B}</code> so each broadcast looks unique to Telegram anti-spam algorithms.</p>
+          <div class="flex items-center gap-3">
+            <h2 class="text-2xl md:text-3xl font-extrabold tracking-tight">Content Templates</h2>
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-800">
+              <i class="fa-solid fa-cloud-arrow-up text-emerald-400"></i> Auto-Preserved
+            </span>
+          </div>
+          <p class="text-sm text-slate-400 mt-1">Create marketing content with Spintax syntax <code>{Option A|Option B}</code>. Saved templates are permanently preserved across server and browser restarts.</p>
         </div>
-        <button onclick="openTemplateModal()" class="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-sm shadow-lg shadow-brand-600/30 flex items-center gap-2 transition self-start sm:self-auto">
-          <i class="fa-solid fa-plus"></i> Create Template
-        </button>
+        <div class="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <input type="file" id="importTemplatesInput" accept=".json" class="hidden" onchange="handleImportTemplates(event)" />
+          <button onclick="triggerImportTemplates()" title="Import templates from JSON" class="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-xs flex items-center gap-1.5 border border-slate-700 transition">
+            <i class="fa-solid fa-file-import"></i> Import
+          </button>
+          <button onclick="exportTemplatesBackup()" title="Download JSON backup" class="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-xs flex items-center gap-1.5 border border-slate-700 transition">
+            <i class="fa-solid fa-file-export"></i> Backup
+          </button>
+          <button onclick="openTemplateModal()" class="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-sm shadow-lg shadow-brand-600/30 flex items-center gap-2 transition">
+            <i class="fa-solid fa-plus"></i> Create Template
+          </button>
+        </div>
       </div>
 
       <!-- Spintax Quick Tips Box -->

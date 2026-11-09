@@ -2,7 +2,7 @@ import os
 import json
 import csv
 import io
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from datetime import datetime
 from contextlib import asynccontextmanager
 
@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from backend.database import (
     init_db, get_templates, get_template, create_template, update_template, delete_template,
+    sync_templates_bulk, sync_campaigns_bulk,
     get_leads, update_lead_status, delete_lead, clear_leads,
     get_campaigns, create_campaign, update_campaign_status,
     get_logs, log_activity, get_setting, set_setting, get_connection
@@ -67,6 +68,19 @@ class RestoreSessionRequest(BaseModel):
 class TemplateCreate(BaseModel):
     name: str
     content: str
+
+class TemplateSyncItem(BaseModel):
+    id: Optional[int] = None
+    name: str
+    content: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+class TemplateSyncRequest(BaseModel):
+    templates: List[TemplateSyncItem]
+
+class CampaignSyncRequest(BaseModel):
+    campaigns: List[Dict[str, Any]]
 
 class TemplatePreview(BaseModel):
     content: str
@@ -187,6 +201,12 @@ def preview_template(req: TemplatePreview):
     rendered = render_template(req.content, {"username": "YourUsername", "first_name": "John"})
     return {"rendered": rendered}
 
+@app.post("/api/templates/sync")
+def sync_templates(req: TemplateSyncRequest):
+    items = [t.dict() for t in req.templates]
+    updated = sync_templates_bulk(items)
+    return {"success": True, "templates": updated}
+
 # ----------------- GROUPS & DIALOGS ROUTES -----------------
 @app.get("/api/groups")
 async def get_groups():
@@ -198,6 +218,11 @@ async def get_groups():
 @app.get("/api/campaigns")
 def list_campaigns():
     return get_campaigns()
+
+@app.post("/api/campaigns/sync")
+def sync_campaigns(req: CampaignSyncRequest):
+    updated = sync_campaigns_bulk(req.campaigns)
+    return {"success": True, "campaigns": updated}
 
 @app.post("/api/campaigns")
 def add_campaign(req: CampaignCreate):

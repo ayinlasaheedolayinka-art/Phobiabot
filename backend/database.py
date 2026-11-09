@@ -7,12 +7,102 @@ from typing import List, Dict, Any, Optional
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "scout_bot.db")
+TEMPLATES_JSON_PATH = os.path.join(DATA_DIR, "templates.json")
+CAMPAIGNS_JSON_PATH = os.path.join(DATA_DIR, "campaigns.json")
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
     return conn
+
+def _restore_templates_internal(cursor) -> int:
+    if not os.path.exists(TEMPLATES_JSON_PATH):
+        return 0
+    try:
+        with open(TEMPLATES_JSON_PATH, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        if not items or not isinstance(items, list):
+            return 0
+        restored = 0
+        now = datetime.now().isoformat()
+        for item in items:
+            name = (item.get("name") or "").strip()
+            content = (item.get("content") or "").strip()
+            if not name or not content:
+                continue
+            cursor.execute("SELECT id FROM templates WHERE name = ?", (name,))
+            row = cursor.fetchone()
+            if row:
+                cursor.execute("UPDATE templates SET content = ?, updated_at = ? WHERE id = ?", (content, now, row["id"]))
+            else:
+                cursor.execute(
+                    "INSERT INTO templates (name, content, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                    (name, content, item.get("created_at", now), item.get("updated_at", now))
+                )
+            restored += 1
+        return restored
+    except Exception as e:
+        print(f"Error restoring templates: {e}")
+        return 0
+
+def _export_templates_internal(cursor):
+    try:
+        cursor.execute("SELECT * FROM templates ORDER BY id DESC")
+        rows = [dict(r) for r in cursor.fetchall()]
+        with open(TEMPLATES_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(rows, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error exporting templates: {e}")
+
+def _restore_campaigns_internal(cursor) -> int:
+    if not os.path.exists(CAMPAIGNS_JSON_PATH):
+        return 0
+    try:
+        with open(CAMPAIGNS_JSON_PATH, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        if not items or not isinstance(items, list):
+            return 0
+        restored = 0
+        now = datetime.now().isoformat()
+        for item in items:
+            name = (item.get("name") or "").strip()
+            if not name:
+                continue
+            cursor.execute("SELECT id FROM campaigns WHERE name = ?", (name,))
+            if not cursor.fetchone():
+                t_ids = item.get("template_ids", [])
+                g_ids = item.get("target_group_ids", [])
+                t_str = json.dumps(t_ids) if isinstance(t_ids, list) else str(t_ids)
+                g_str = json.dumps(g_ids) if isinstance(g_ids, list) else str(g_ids)
+                cursor.execute("""
+                INSERT INTO campaigns (name, template_ids, target_group_ids, interval_val, interval_unit, delay_min, delay_max, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    name,
+                    t_str,
+                    g_str,
+                    int(item.get("interval_val", 30)),
+                    item.get("interval_unit", "minutes"),
+                    int(item.get("delay_min", 15)),
+                    int(item.get("delay_max", 45)),
+                    item.get("status", "stopped"),
+                    item.get("created_at", now)
+                ))
+                restored += 1
+        return restored
+    except Exception as e:
+        print(f"Error restoring campaigns: {e}")
+        return 0
+
+def _export_campaigns_internal(cursor):
+    try:
+        cursor.execute("SELECT * FROM campaigns ORDER BY id DESC")
+        rows = [dict(r) for r in cursor.fetchall()]
+        with open(CAMPAIGNS_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(rows, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error exporting campaigns: {e}")
 
 def init_db():
     conn = get_connection()
@@ -100,30 +190,39 @@ def init_db():
 
     conn.commit()
 
-    # Pre-populate some starter IPTV templates if empty
+    # Pre-populate or restore templates from persistent file storage
     cursor.execute("SELECT COUNT(*) as count FROM templates")
     if cursor.fetchone()["count"] == 0:
-        starter_templates = [
-            (
-                "IPTV Premium Offer #1",
-                "{Hello|Hey|Hi} everyone! 👋\n\nLooking for a {rock-solid|ultra-fast|top-tier} IPTV service?\n🔥 18,000+ Channels & 80,000+ VOD (4K/FHD)\n⚡ Anti-Freeze Tech | No Buffering\n📺 Compatible with Firestick, Smart TV, Android, MAG, Apple TV\n\n👉 Free 24h Trial Available! DM @{username} now to get set up instantly! 🚀",
-                datetime.now().isoformat(),
-                datetime.now().isoformat()
-            ),
-            (
-                "Reseller & Rebrand Panel Special",
-                "{Attention Resellers|Reseller Opportunity|Boost your IPTV business} 💼\n\nLooking to start or scale your own IPTV brand?\n✅ Super Reseller & Master Panels available\n✅ Custom App Rebranding (IBO Player, Smarters Pro, XCIPTV)\n✅ Best credit prices in the market with instant activation\n✅ 24/7 dedicated support & 99.9% uptime server\n\n📩 Message @{username} for panel test and price list!",
-                datetime.now().isoformat(),
-                datetime.now().isoformat()
-            ),
-            (
-                "Fast Trial & Support",
-                "{Tired of freezing streams during live sports?|Looking for the best football and sports streams?} ⚽🥊\n\nTest our ultra-fast server before you buy!\n✅ All Sports & PPV in FHD/4K (60 FPS)\n✅ Full EPG guide included\n✅ 1, 3, 6 & 12 Month plans\n\nDrop a DM to @{username} for your free test link today! 🎯",
-                datetime.now().isoformat(),
-                datetime.now().isoformat()
-            )
-        ]
-        cursor.executemany("INSERT INTO templates (name, content, created_at, updated_at) VALUES (?, ?, ?, ?)", starter_templates)
+        restored = _restore_templates_internal(cursor)
+        if restored == 0:
+            starter_templates = [
+                (
+                    "IPTV Premium Offer #1",
+                    "{Hello|Hey|Hi} everyone! 👋\n\nLooking for a {rock-solid|ultra-fast|top-tier} IPTV service?\n🔥 18,000+ Channels & 80,000+ VOD (4K/FHD)\n⚡ Anti-Freeze Tech | No Buffering\n📺 Compatible with Firestick, Smart TV, Android, MAG, Apple TV\n\n👉 Free 24h Trial Available! DM @{username} now to get set up instantly! 🚀",
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat()
+                ),
+                (
+                    "Reseller & Rebrand Panel Special",
+                    "{Attention Resellers|Reseller Opportunity|Boost your IPTV business} 💼\n\nLooking to start or scale your own IPTV brand?\n✅ Super Reseller & Master Panels available\n✅ Custom App Rebranding (IBO Player, Smarters Pro, XCIPTV)\n✅ Best credit prices in the market with instant activation\n✅ 24/7 dedicated support & 99.9% uptime server\n\n📩 Message @{username} for panel test and price list!",
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat()
+                ),
+                (
+                    "Fast Trial & Support",
+                    "{Tired of freezing streams during live sports?|Looking for the best football and sports streams?} ⚽🥊\n\nTest our ultra-fast server before you buy!\n✅ All Sports & PPV in FHD/4K (60 FPS)\n✅ Full EPG guide included\n✅ 1, 3, 6 & 12 Month plans\n\nDrop a DM to @{username} for your free test link today! 🎯",
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat()
+                )
+            ]
+            cursor.executemany("INSERT INTO templates (name, content, created_at, updated_at) VALUES (?, ?, ?, ?)", starter_templates)
+            conn.commit()
+            _export_templates_internal(cursor)
+
+    # Restore campaigns from file if empty
+    cursor.execute("SELECT COUNT(*) as count FROM campaigns")
+    if cursor.fetchone()["count"] == 0:
+        _restore_campaigns_internal(cursor)
         conn.commit()
 
     # Pre-populate default IPTV keywords if not set
@@ -184,6 +283,7 @@ def create_template(name: str, content: str) -> int:
     )
     conn.commit()
     new_id = cursor.lastrowid
+    _export_templates_internal(cursor)
     conn.close()
     log_activity("INFO", "TEMPLATE", f"Created template '{name}' (ID: {new_id})")
     return new_id
@@ -198,6 +298,7 @@ def update_template(template_id: int, name: str, content: str) -> bool:
     )
     conn.commit()
     affected = cursor.rowcount > 0
+    _export_templates_internal(cursor)
     conn.close()
     log_activity("INFO", "TEMPLATE", f"Updated template (ID: {template_id})")
     return affected
@@ -208,9 +309,48 @@ def delete_template(template_id: int) -> bool:
     cursor.execute("DELETE FROM templates WHERE id = ?", (template_id,))
     conn.commit()
     affected = cursor.rowcount > 0
+    _export_templates_internal(cursor)
     conn.close()
     log_activity("INFO", "TEMPLATE", f"Deleted template (ID: {template_id})")
     return affected
+
+def export_templates_to_file():
+    conn = get_connection()
+    cursor = conn.cursor()
+    _export_templates_internal(cursor)
+    conn.close()
+
+def restore_templates_from_file() -> int:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cnt = _restore_templates_internal(cursor)
+    conn.commit()
+    conn.close()
+    return cnt
+
+def sync_templates_bulk(templates_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = datetime.now().isoformat()
+    for item in templates_list:
+        name = (item.get("name") or "").strip()
+        content = (item.get("content") or "").strip()
+        if not name or not content:
+            continue
+        cursor.execute("SELECT id FROM templates WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        if row:
+            cursor.execute("UPDATE templates SET content = ?, updated_at = ? WHERE id = ?", (content, now, row["id"]))
+        else:
+            cursor.execute(
+                "INSERT INTO templates (name, content, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (name, content, item.get("created_at", now), item.get("updated_at", now))
+            )
+    conn.commit()
+    _export_templates_internal(cursor)
+    conn.close()
+    log_activity("INFO", "TEMPLATE", f"Auto-synced {len(templates_list)} templates with cloud storage")
+    return get_templates()
 
 # Leads CRUD & Query
 def add_lead(lead_data: dict) -> bool:
@@ -335,6 +475,7 @@ def create_campaign(data: dict) -> int:
     ))
     conn.commit()
     new_id = cursor.lastrowid
+    _export_campaigns_internal(cursor)
     conn.close()
     log_activity("INFO", "POSTER", f"Created campaign '{data.get('name')}' (ID: {new_id})")
     return new_id
@@ -354,6 +495,7 @@ def update_campaign_status(campaign_id: int, status: str, last_run: str = None, 
     params.append(campaign_id)
     cursor.execute(query, params)
     conn.commit()
+    _export_campaigns_internal(cursor)
     conn.close()
 
 def increment_campaign_posts(campaign_id: int):
@@ -362,3 +504,55 @@ def increment_campaign_posts(campaign_id: int):
     cursor.execute("UPDATE campaigns SET posts_sent = posts_sent + 1 WHERE id = ?", (campaign_id,))
     conn.commit()
     conn.close()
+
+def export_campaigns_to_file():
+    conn = get_connection()
+    cursor = conn.cursor()
+    _export_campaigns_internal(cursor)
+    conn.close()
+
+def restore_campaigns_from_file() -> int:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cnt = _restore_campaigns_internal(cursor)
+    conn.commit()
+    conn.close()
+    return cnt
+
+def sync_campaigns_bulk(campaigns_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = datetime.now().isoformat()
+    for item in campaigns_list:
+        name = (item.get("name") or "").strip()
+        if not name:
+            continue
+        cursor.execute("SELECT id FROM campaigns WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        t_ids = item.get("template_ids", [])
+        g_ids = item.get("target_group_ids", [])
+        t_str = json.dumps(t_ids) if isinstance(t_ids, list) else str(t_ids)
+        g_str = json.dumps(g_ids) if isinstance(g_ids, list) else str(g_ids)
+        if row:
+            cursor.execute("""
+            UPDATE campaigns SET template_ids = ?, target_group_ids = ?, interval_val = ?, interval_unit = ?, delay_min = ?, delay_max = ? WHERE id = ?
+            """, (t_str, g_str, int(item.get("interval_val", 30)), item.get("interval_unit", "minutes"), int(item.get("delay_min", 15)), int(item.get("delay_max", 45)), row["id"]))
+        else:
+            cursor.execute("""
+            INSERT INTO campaigns (name, template_ids, target_group_ids, interval_val, interval_unit, delay_min, delay_max, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                name,
+                t_str,
+                g_str,
+                int(item.get("interval_val", 30)),
+                item.get("interval_unit", "minutes"),
+                int(item.get("delay_min", 15)),
+                int(item.get("delay_max", 45)),
+                item.get("status", "stopped"),
+                item.get("created_at", now)
+            ))
+    conn.commit()
+    _export_campaigns_internal(cursor)
+    conn.close()
+    return get_campaigns()
