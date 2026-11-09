@@ -78,8 +78,19 @@ class CampaignScheduler:
             except Exception as e:
                 log_activity("ERROR", "SCHEDULER", f"Error in scheduler loop: {str(e)}")
 
+            # Render Cloud Keep-Alive: Ping self every 8 minutes to prevent container spin-down
+            if now.second == 0 and now.minute % 8 == 0:
+                asyncio.create_task(self._ping_keep_alive())
+
             # Check every second for responsive second-based intervals
             await asyncio.sleep(1)
+
+    async def _ping_keep_alive(self):
+        try:
+            import urllib.request
+            urllib.request.urlopen("https://phobiabot.onrender.com/api/status", timeout=10)
+        except Exception:
+            pass
 
     async def _execute_campaign(self, campaign: dict, tg: TelegramManager):
         camp_id = campaign["id"]

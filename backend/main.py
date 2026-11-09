@@ -58,6 +58,12 @@ class VerifyCodeRequest(BaseModel):
     code: str
     password: Optional[str] = None
 
+class RestoreSessionRequest(BaseModel):
+    session_string: str
+    api_id: Optional[int] = None
+    api_hash: Optional[str] = None
+    phone: Optional[str] = None
+
 class TemplateCreate(BaseModel):
     name: str
     content: str
@@ -141,6 +147,14 @@ async def verify_code(req: VerifyCodeRequest):
 async def logout():
     tg = TelegramManager.get_instance()
     return await tg.logout()
+
+@app.post("/api/auth/restore-session")
+async def restore_session(req: RestoreSessionRequest):
+    tg = TelegramManager.get_instance()
+    res = await tg.restore_session(req.session_string, req.api_id, req.api_hash, req.phone)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Failed to restore session"))
+    return res
 
 # ----------------- TEMPLATES ROUTES -----------------
 @app.get("/api/templates")

@@ -1,10 +1,12 @@
 import os
 import re
 import asyncio
+import time
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 from telethon import TelegramClient, events, errors
+from telethon.sessions import StringSession
 from telethon.tl.types import Channel, Chat, User
 from telethon.tl.functions.channels import JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest
@@ -17,6 +19,7 @@ from backend.spintax import render_template
 SESSION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 os.makedirs(SESSION_DIR, exist_ok=True)
 SESSION_FILE = os.path.join(SESSION_DIR, "scout_user.session")
+SESSION_STR_FILE = os.path.join(SESSION_DIR, "session_string.txt")
 
 class TelegramManager:
     _instance = None
@@ -28,7 +31,9 @@ class TelegramManager:
         self.is_scanning: bool = False
         self.live_scout_active: bool = False
         self.live_scout_keywords: List[str] = []
-        self.event_subscribers = [] # WebSocket callbacks
+        self._cached_user: Optional[Dict[str, Any]] = None
+        self._last_user_check: float = 0
+        self._is_connecting: bool = False
 
     @classmethod
     def get_instance(cls):
@@ -36,31 +41,88 @@ class TelegramManager:
             cls._instance = TelegramManager()
         return cls._instance
 
-    def get_credentials(self) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    def get_credentials(self) -> tuple[Optional[int], Optional[str], Optional[str], Optional[str]]:
         api_id = get_setting("api_id")
         api_hash = get_setting("api_hash")
         phone = get_setting("phone")
+        session_str = get_setting("session_string")
+
+        # Fallback to local session string file if DB was wiped on restart
+        if not session_str and os.path.exists(SESSION_STR_FILE):
+            try:
+                with open(SESSION_STR_FILE, "r") as f:
+                    session_str = f.read().strip()
+            except Exception:
+                pass
+
         try:
             api_id = int(api_id) if api_id else None
         except (ValueError, TypeError):
             api_id = None
-        return api_id, api_hash, phone
+        return api_id, api_hash, phone, session_str
+
+    def _save_session_string(self, session_str: str):
+        if session_str:
+            set_setting("session_string", session_str)
+            try:
+                with open(SESSION_STR_FILE, "w") as f:
+                    f.write(session_str)
+            except Exception:
+                pass
 
     async def get_client(self) -> Optional[TelegramClient]:
-        if self.client and self.client.is_connected():
+        if self.client:
+            if self.client.is_connected():
+                return self.client
+            try:
+                await self.client.connect()
+                return self.client
+            except Exception as e:
+                log_activity("WARNING", "AUTH", f"Telegram reconnecting: {str(e)}")
+
+        if self._is_connecting:
+            for _ in range(30):
+                await asyncio.sleep(0.2)
+                if self.client and self.client.is_connected():
+                    return self.client
+
+        self._is_connecting = True
+        try:
+            api_id, api_hash, _, session_str = self.get_credentials()
+            if not api_id or not api_hash:
+                return None
+
+            # Prefer StringSession for 100% resilience across server restarts
+            if session_str:
+                session = StringSession(session_str)
+            elif os.path.exists(SESSION_FILE):
+                session = SESSION_FILE
+            else:
+                session = StringSession("")
+
+            self.client = TelegramClient(
+                session, 
+                api_id, 
+                api_hash,
+                auto_reconnect=True,
+                connection_retries=None,
+                retry_delay=2,
+                timeout=15
+            )
+            await self.client.connect()
+
+            # If authorized, persist as StringSession
+            if await self.client.is_user_authorized():
+                saved_str = self.client.session.save()
+                if isinstance(saved_str, str) and saved_str:
+                    self._save_session_string(saved_str)
+
             return self.client
-
-        api_id, api_hash, _ = self.get_credentials()
-        if not api_id or not api_hash:
-            return None
-
-        # Create telethon client
-        self.client = TelegramClient(SESSION_FILE, api_id, api_hash)
-        await self.client.connect()
-        return self.client
+        finally:
+            self._is_connecting = False
 
     async def get_status(self) -> Dict[str, Any]:
-        api_id, api_hash, phone = self.get_credentials()
+        api_id, api_hash, phone, session_str = self.get_credentials()
         has_creds = bool(api_id and api_hash)
         
         is_auth = False
@@ -70,25 +132,82 @@ class TelegramManager:
             client = await self.get_client()
             if client and await client.is_user_authorized():
                 is_auth = True
-                me = await client.get_me()
-                user_info = {
-                    "id": me.id,
-                    "first_name": me.first_name or "",
-                    "last_name": me.last_name or "",
-                    "username": me.username or "",
-                    "phone": me.phone or phone or "",
-                    "is_premium": getattr(me, "premium", False)
-                }
+                now = time.time()
+                # Use cached user info to avoid hammering Telegram get_me() every 4s
+                if self._cached_user and (now - self._last_user_check) < 300:
+                    user_info = self._cached_user
+                else:
+                    me = await client.get_me()
+                    if me:
+                        user_info = {
+                            "id": me.id,
+                            "first_name": me.first_name or "",
+                            "last_name": me.last_name or "",
+                            "username": me.username or "",
+                            "phone": me.phone or phone or "",
+                            "is_premium": getattr(me, "premium", False)
+                        }
+                        self._cached_user = user_info
+                        self._last_user_check = now
+                        saved_str = client.session.save()
+                        if isinstance(saved_str, str) and saved_str:
+                            self._save_session_string(saved_str)
+                            session_str = saved_str
+            else:
+                # If temporary disconnect but session string exists, preserve auth
+                if self._cached_user and bool(session_str):
+                    user_info = self._cached_user
+                    is_auth = True
         except Exception as e:
-            log_activity("WARNING", "AUTH", f"Status check error: {str(e)}")
+            if self._cached_user and bool(session_str):
+                user_info = self._cached_user
+                is_auth = True
 
         return {
             "has_credentials": has_creds,
             "is_authorized": is_auth,
             "user": user_info,
             "api_id": api_id,
-            "phone": phone
+            "phone": phone,
+            "session_string": session_str or ""
         }
+
+    async def restore_session(self, session_str: str, api_id: Optional[int] = None, api_hash: Optional[str] = None, phone: Optional[str] = None) -> Dict[str, Any]:
+        if api_id:
+            set_setting("api_id", api_id)
+        if api_hash:
+            set_setting("api_hash", api_hash)
+        if phone:
+            set_setting("phone", phone)
+
+        session_str = session_str.strip()
+        self._save_session_string(session_str)
+
+        # Disconnect any old instance
+        if self.client and self.client.is_connected():
+            try:
+                await self.client.disconnect()
+            except Exception:
+                pass
+        self.client = None
+
+        client = await self.get_client()
+        if client and await client.is_user_authorized():
+            me = await client.get_me()
+            self._cached_user = {
+                "id": me.id,
+                "first_name": me.first_name or "",
+                "last_name": me.last_name or "",
+                "username": me.username or "",
+                "phone": me.phone or phone or "",
+                "is_premium": getattr(me, "premium", False)
+            }
+            self._last_user_check = time.time()
+            set_setting("is_connected", "1")
+            log_activity("SUCCESS", "AUTH", f"Telegram session automatically restored for {me.first_name}!")
+            return {"success": True, "user": self._cached_user, "session_string": session_str}
+        else:
+            return {"success": False, "error": "Invalid or expired session"}
 
     async def request_code(self, api_id: int, api_hash: str, phone: str) -> Dict[str, Any]:
         phone = phone.strip().replace(" ", "").replace("-", "")
@@ -99,7 +218,8 @@ class TelegramManager:
         if self.client and self.client.is_connected():
             await self.client.disconnect()
 
-        self.client = TelegramClient(SESSION_FILE, api_id, api_hash)
+        # Initialize fresh StringSession
+        self.client = TelegramClient(StringSession(""), api_id, api_hash, auto_reconnect=True)
         await self.client.connect()
 
         try:
@@ -126,16 +246,24 @@ class TelegramManager:
                 await self.client.sign_in(password=password)
 
             me = await self.client.get_me()
+            saved_str = self.client.session.save()
+            if isinstance(saved_str, str) and saved_str:
+                self._save_session_string(saved_str)
+
+            self._cached_user = {
+                "id": me.id,
+                "first_name": me.first_name or "",
+                "last_name": me.last_name or "",
+                "username": me.username or "",
+                "phone": me.phone or self.temp_phone or ""
+            }
+            self._last_user_check = time.time()
             set_setting("is_connected", "1")
             log_activity("SUCCESS", "AUTH", f"Successfully logged into Telegram as {me.first_name} (@{me.username})")
             return {
                 "success": True,
-                "user": {
-                    "id": me.id,
-                    "first_name": me.first_name,
-                    "username": me.username,
-                    "phone": me.phone
-                }
+                "user": self._cached_user,
+                "session_string": saved_str
             }
         except Exception as e:
             log_activity("ERROR", "AUTH", f"Sign in failed: {str(e)}")
@@ -144,19 +272,34 @@ class TelegramManager:
     async def logout(self) -> Dict[str, Any]:
         try:
             if self.client and self.client.is_connected():
-                await self.client.log_out()
+                try:
+                    await self.client.log_out()
+                except Exception:
+                    pass
                 await self.client.disconnect()
             
-            # Remove session file
+            self.client = None
+            self._cached_user = None
+            self._last_user_check = 0
+
+            # Clear session strings
+            set_setting("session_string", "")
+            set_setting("is_connected", "0")
+            if os.path.exists(SESSION_STR_FILE):
+                try:
+                    os.remove(SESSION_STR_FILE)
+                except Exception:
+                    pass
+
+            # Remove session files
             for ext in ["", "-journal"]:
                 fpath = SESSION_FILE + ext
                 if os.path.exists(fpath):
                     try:
                         os.remove(fpath)
-                    except:
+                    except Exception:
                         pass
 
-            set_setting("is_connected", "0")
             log_activity("INFO", "AUTH", "User logged out of Telegram")
             return {"success": True, "message": "Logged out successfully"}
         except Exception as e:
@@ -171,7 +314,6 @@ class TelegramManager:
         try:
             async for dialog in client.iter_dialogs():
                 entity = dialog.entity
-                # Filter for groups, supergroups, and broadcast channels
                 if dialog.is_group or dialog.is_channel:
                     member_count = getattr(entity, 'participants_count', 0)
                     groups.append({
@@ -200,7 +342,6 @@ class TelegramManager:
         })
 
         try:
-            # Resolve target entity
             entity = await client.get_entity(group_id_or_username)
             entity_name = getattr(entity, 'title', str(group_id_or_username))
             
@@ -235,7 +376,6 @@ class TelegramManager:
         log_activity("INFO", "SCOUT", f"Starting deep scout scan on '{target_clean}' for IPTV discussions...")
         
         try:
-            # Check if it's an invite link (starts with + or joinchat/)
             if target_clean.startswith("+") or "joinchat/" in target_clean:
                 invite_hash = target_clean.replace("+", "").replace("joinchat/", "")
                 try:
@@ -261,7 +401,7 @@ class TelegramManager:
             scanned_msg_ids = set()
             new_leads = []
 
-            # 1. Server-side keyword search: pulls all historical messages in this group mentioning IPTV keywords
+            # 1. Server-side keyword search across group history
             for kw in kw_clean:
                 try:
                     async for message in client.iter_messages(entity, search=kw, limit=100):
@@ -295,7 +435,7 @@ class TelegramManager:
                 except Exception:
                     pass
 
-            # 2. Recent chronological message scan for any additional variations
+            # 2. Sequential recent message scan
             try:
                 async for message in client.iter_messages(entity, limit=min(scan_depth, 500)):
                     if not message or message.id in scanned_msg_ids:

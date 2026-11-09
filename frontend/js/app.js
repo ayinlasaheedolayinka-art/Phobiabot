@@ -169,9 +169,44 @@ async function checkStatus() {
       setupDesc.innerText = `Logged in as ${tg.user.first_name} (@${tg.user.username || 'No Handle'})`;
       if (btnLogout) btnLogout.classList.remove('hidden');
 
-      if (tg.api_id) document.getElementById('apiIdInput').value = tg.api_id;
-      if (tg.phone) document.getElementById('phoneInput').value = tg.phone;
+      if (tg.api_id) {
+        document.getElementById('apiIdInput').value = tg.api_id;
+        localStorage.setItem('TG_API_ID', tg.api_id);
+      }
+      if (tg.phone) {
+        document.getElementById('phoneInput').value = tg.phone;
+        localStorage.setItem('TG_PHONE', tg.phone);
+      }
+      if (tg.session_string) {
+        localStorage.setItem('TG_SESSION_STRING', tg.session_string);
+      }
     } else {
+      // Auto-restore session from browser storage if server rebooted or spun down
+      const savedSession = localStorage.getItem('TG_SESSION_STRING');
+      if (savedSession && !state._isRestoringSession) {
+        state._isRestoringSession = true;
+        fetch('/api/auth/restore-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_string: savedSession,
+            api_id: localStorage.getItem('TG_API_ID') ? parseInt(localStorage.getItem('TG_API_ID')) : undefined,
+            api_hash: localStorage.getItem('TG_API_HASH') || undefined,
+            phone: localStorage.getItem('TG_PHONE') || undefined
+          })
+        }).then(r => r.json()).then(resData => {
+          if (resData.success) {
+            checkStatus();
+            loadGroups();
+          }
+        }).catch(e => {
+          console.warn('Auto restore failed:', e);
+        }).finally(() => {
+          setTimeout(() => { state._isRestoringSession = false; }, 8000);
+        });
+        return;
+      }
+
       if (unauthAlert) unauthAlert.classList.remove('hidden');
 
       sidebarDot.className = 'w-3 h-3 rounded-full bg-amber-500';
@@ -197,6 +232,10 @@ async function handleSendCode(e) {
   const apiId = document.getElementById('apiIdInput').value;
   const apiHash = document.getElementById('apiHashInput').value;
   const phone = document.getElementById('phoneInput').value;
+
+  if (apiId) localStorage.setItem('TG_API_ID', apiId);
+  if (apiHash) localStorage.setItem('TG_API_HASH', apiHash);
+  if (phone) localStorage.setItem('TG_PHONE', phone);
 
   const btn = document.getElementById('btnRequestCode');
   btn.disabled = true;
@@ -244,8 +283,11 @@ async function handleVerifyCode(e) {
       document.getElementById('twoFactorField').classList.remove('hidden');
       showNotification('Your account has Two-Factor Authentication. Please enter your 2FA password.', 'warning');
     } else if (data.success) {
+      if (data.session_string) {
+        localStorage.setItem('TG_SESSION_STRING', data.session_string);
+      }
       closeModal('otpModal');
-      showNotification(`Successfully logged into Telegram!`, 'success');
+      showNotification(`Successfully logged into Telegram! Permanent session saved.`, 'success');
       await checkStatus();
       await loadGroups();
     } else {
@@ -262,6 +304,10 @@ async function handleVerifyCode(e) {
 async function logoutTelegram() {
   if (!confirm('Are you sure you want to log out of Telegram?')) return;
   try {
+    localStorage.removeItem('TG_SESSION_STRING');
+    localStorage.removeItem('TG_API_ID');
+    localStorage.removeItem('TG_API_HASH');
+    localStorage.removeItem('TG_PHONE');
     const res = await fetch('/api/auth/logout', { method: 'POST' });
     const data = await res.json();
     if (data.success) {
