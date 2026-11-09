@@ -36,6 +36,8 @@ class TelegramManager:
         self._last_user_check: float = 0
         self._is_connecting: bool = False
         self._keep_alive_task: Optional[asyncio.Task] = None
+        self._cached_groups: List[Dict[str, Any]] = []
+        self._cached_groups_time: float = 0
 
     @classmethod
     def get_instance(cls):
@@ -390,9 +392,13 @@ class TelegramManager:
             return {"success": False, "error": str(e)}
 
     async def get_dialogs_and_groups(self) -> List[Dict[str, Any]]:
+        # Fast cache check (valid for 60 seconds)
+        if self._cached_groups and (time.time() - self._cached_groups_time < 60):
+            return self._cached_groups
+
         client = await self.get_client()
         if not client or not await client.is_user_authorized():
-            return []
+            return self._cached_groups or []
 
         groups = []
         try:
@@ -409,10 +415,15 @@ class TelegramManager:
                         "unread_count": dialog.unread_count,
                         "member_count": member_count
                     })
+            if groups:
+                self._cached_groups = groups
+                self._cached_groups_time = time.time()
         except Exception as e:
             log_activity("ERROR", "TELEGRAM", f"Error fetching groups: {str(e)}")
+            if self._cached_groups:
+                return self._cached_groups
 
-        return groups
+        return groups or self._cached_groups
 
     async def send_post(self, group_id_or_username: Any, template_text: str) -> Dict[str, Any]:
         client = await self.get_client()

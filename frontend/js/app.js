@@ -1,8 +1,29 @@
 // Render Backend Connection Config
 const RENDER_BACKEND_URL = 'https://phobiabot.onrender.com';
 
+// Safe localStorage wrapper to prevent Mobile Safari / Private Browsing / sandboxed WebView exceptions
+const storage = {
+  get(key) {
+    try {
+      return (typeof window !== 'undefined' && window.localStorage) ? window.localStorage.getItem(key) : null;
+    } catch (e) {
+      return null;
+    }
+  },
+  set(key, val) {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) window.localStorage.setItem(key, String(val));
+    } catch (e) {}
+  },
+  remove(key) {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) window.localStorage.removeItem(key);
+    } catch (e) {}
+  }
+};
+
 function getApiBase() {
-  const custom = localStorage.getItem('API_BASE_URL');
+  const custom = storage.get('API_BASE_URL');
   if (custom) return custom.replace(/\/+$/, '');
   const host = window.location.hostname;
   if (host === 'localhost' || host === '127.0.0.1' || host.includes('onrender.com')) {
@@ -37,26 +58,34 @@ const state = {
 };
 
 // Initialization on DOM Ready
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
   setupNavigation();
 
   // Auto-fill credential fields from browser storage if present
-  const savedApiId = localStorage.getItem('TG_API_ID');
-  const savedApiHash = localStorage.getItem('TG_API_HASH');
-  const savedPhone = localStorage.getItem('TG_PHONE');
-  const apiIdEl = document.getElementById('apiIdInput');
-  const apiHashEl = document.getElementById('apiHashInput');
-  const phoneEl = document.getElementById('phoneInput');
-  if (savedApiId && apiIdEl) apiIdEl.value = savedApiId;
-  if (savedApiHash && apiHashEl) apiHashEl.value = savedApiHash;
-  if (savedPhone && phoneEl) phoneEl.value = savedPhone;
+  try {
+    const savedApiId = storage.get('TG_API_ID');
+    const savedApiHash = storage.get('TG_API_HASH');
+    const savedPhone = storage.get('TG_PHONE');
+    const apiIdEl = document.getElementById('apiIdInput');
+    const apiHashEl = document.getElementById('apiHashInput');
+    const phoneEl = document.getElementById('phoneInput');
+    if (savedApiId && apiIdEl) apiIdEl.value = savedApiId;
+    if (savedApiHash && apiHashEl) apiHashEl.value = savedApiHash;
+    if (savedPhone && phoneEl) phoneEl.value = savedPhone;
+  } catch (e) {}
 
-  await refreshAll();
+  // Immediate rendering of fast metrics so mobile screen displays in ~100ms
+  loadStats();
+  loadLogs();
+  checkStatus();
+
+  // Parallel background refresh of full data
+  refreshAll();
   
   // Background polling for logs and stats every 4 seconds
-  setInterval(async () => {
-    await loadLogs();
-    await loadStats();
+  setInterval(() => {
+    loadLogs();
+    loadStats();
   }, 4000);
 });
 
@@ -67,6 +96,11 @@ function setupNavigation() {
     tab.addEventListener('click', () => {
       const target = tab.getAttribute('data-tab');
       switchTab(target);
+      // Auto-close mobile drawer when user taps a navigation link
+      const sidebar = document.getElementById('sidebar');
+      if (window.innerWidth < 768 && sidebar) {
+        sidebar.classList.add('hidden');
+      }
     });
   });
 
@@ -135,16 +169,18 @@ function hideNotification() {
   document.getElementById('globalNotification').classList.add('hidden');
 }
 
-// Refresh Everything
+// Refresh Everything Concurrently Without Blocking
 async function refreshAll() {
-  await checkStatus();
-  await loadGroups();
-  await loadStats();
-  await loadTemplates();
-  await loadCampaigns();
-  await loadLeads();
-  await loadLogs();
-  await loadKeywords();
+  await Promise.allSettled([
+    checkStatus(),
+    loadStats(),
+    loadLogs(),
+    loadTemplates(),
+    loadCampaigns(),
+    loadLeads(),
+    loadKeywords(),
+    loadGroups()
+  ]);
 }
 
 async function refreshDashboard() {
@@ -156,6 +192,7 @@ async function refreshDashboard() {
 async function checkStatus() {
   try {
     const res = await fetch('/api/status');
+    if (!res.ok) return;
     const data = await res.json();
     state.status = data;
 
@@ -173,43 +210,48 @@ async function checkStatus() {
     if (tg.is_authorized && tg.user) {
       if (unauthAlert) unauthAlert.classList.add('hidden');
       
-      sidebarDot.className = 'w-3 h-3 rounded-full bg-brand-400 pulse-emerald';
-      sidebarName.innerText = tg.user.first_name + (tg.user.username ? ` (@${tg.user.username})` : '');
-      sidebarSub.innerText = tg.user.phone ? `+${tg.user.phone}` : 'Connected';
+      if (sidebarDot) sidebarDot.className = 'w-3 h-3 rounded-full bg-brand-400 pulse-emerald';
+      if (sidebarName) sidebarName.innerText = tg.user.first_name + (tg.user.username ? ` (@${tg.user.username})` : '');
+      if (sidebarSub) sidebarSub.innerText = tg.user.phone ? `+${tg.user.phone}` : 'Connected';
 
-      setupDot.className = 'w-3.5 h-3.5 rounded-full bg-brand-400';
-      setupTitle.innerText = 'Connected';
-      setupDesc.innerText = `Logged in as ${tg.user.first_name} (@${tg.user.username || 'No Handle'})`;
+      if (setupDot) setupDot.className = 'w-3.5 h-3.5 rounded-full bg-brand-400';
+      if (setupTitle) setupTitle.innerText = 'Connected';
+      if (setupDesc) setupDesc.innerText = `Logged in as ${tg.user.first_name} (@${tg.user.username || 'No Handle'})`;
       if (btnLogout) btnLogout.classList.remove('hidden');
 
       if (tg.api_id) {
-        document.getElementById('apiIdInput').value = tg.api_id;
-        localStorage.setItem('TG_API_ID', tg.api_id);
+        const el = document.getElementById('apiIdInput');
+        if (el) el.value = tg.api_id;
+        storage.set('TG_API_ID', tg.api_id);
       }
       if (tg.phone) {
-        document.getElementById('phoneInput').value = tg.phone;
-        localStorage.setItem('TG_PHONE', tg.phone);
+        const el = document.getElementById('phoneInput');
+        if (el) el.value = tg.phone;
+        storage.set('TG_PHONE', tg.phone);
       }
       if (tg.session_string) {
-        localStorage.setItem('TG_SESSION_STRING', tg.session_string);
+        storage.set('TG_SESSION_STRING', tg.session_string);
       }
-      localStorage.setItem('TG_USER_INFO', JSON.stringify(tg.user));
+      storage.set('TG_USER_INFO', JSON.stringify(tg.user));
     } else {
       // Auto-restore session from browser storage if server rebooted or spun down
-      const savedSession = localStorage.getItem('TG_SESSION_STRING');
-      const savedUser = JSON.parse(localStorage.getItem('TG_USER_INFO') || 'null');
+      const savedSession = storage.get('TG_SESSION_STRING');
+      let savedUser = null;
+      try {
+        savedUser = JSON.parse(storage.get('TG_USER_INFO') || 'null');
+      } catch (e) {}
       
       if (savedSession) {
         // User IS logged in permanently in browser! Keep UI connected!
         if (unauthAlert) unauthAlert.classList.add('hidden');
         if (btnLogout) btnLogout.classList.remove('hidden');
         if (savedUser) {
-          sidebarDot.className = 'w-3 h-3 rounded-full bg-brand-400 pulse-emerald';
-          sidebarName.innerText = savedUser.first_name + (savedUser.username ? ` (@${savedUser.username})` : '');
-          sidebarSub.innerText = savedUser.phone ? `+${savedUser.phone}` : 'Connected';
-          setupDot.className = 'w-3.5 h-3.5 rounded-full bg-brand-400';
-          setupTitle.innerText = 'Connected';
-          setupDesc.innerText = `Logged in as ${savedUser.first_name} (@${savedUser.username || 'No Handle'})`;
+          if (sidebarDot) sidebarDot.className = 'w-3 h-3 rounded-full bg-brand-400 pulse-emerald';
+          if (sidebarName) sidebarName.innerText = savedUser.first_name + (savedUser.username ? ` (@${savedUser.username})` : '');
+          if (sidebarSub) sidebarSub.innerText = savedUser.phone ? `+${savedUser.phone}` : 'Connected';
+          if (setupDot) setupDot.className = 'w-3.5 h-3.5 rounded-full bg-brand-400';
+          if (setupTitle) setupTitle.innerText = 'Connected';
+          if (setupDesc) setupDesc.innerText = `Logged in as ${savedUser.first_name} (@${savedUser.username || 'No Handle'})`;
         }
 
         if (!state._isRestoringSession) {
@@ -219,9 +261,9 @@ async function checkStatus() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               session_string: savedSession,
-              api_id: localStorage.getItem('TG_API_ID') ? parseInt(localStorage.getItem('TG_API_ID')) : undefined,
-              api_hash: localStorage.getItem('TG_API_HASH') || undefined,
-              phone: localStorage.getItem('TG_PHONE') || undefined
+              api_id: storage.get('TG_API_ID') ? parseInt(storage.get('TG_API_ID')) : undefined,
+              api_hash: storage.get('TG_API_HASH') || undefined,
+              phone: storage.get('TG_PHONE') || undefined
             })
           }).then(r => r.json()).then(resData => {
             if (resData.success) {
@@ -238,28 +280,20 @@ async function checkStatus() {
 
       if (unauthAlert) unauthAlert.classList.remove('hidden');
 
-      sidebarDot.className = 'w-3 h-3 rounded-full bg-amber-500';
-      sidebarName.innerText = 'Not Connected';
-      sidebarSub.innerText = 'Connect Telegram';
+      if (sidebarDot) sidebarDot.className = 'w-3 h-3 rounded-full bg-amber-500';
+      if (sidebarName) sidebarName.innerText = 'Not Connected';
+      if (sidebarSub) sidebarSub.innerText = 'Connect Telegram';
 
-      setupDot.className = 'w-3.5 h-3.5 rounded-full bg-slate-500';
-      setupTitle.innerText = 'Disconnected';
-      setupDesc.innerText = 'Enter your Telegram credentials below to sign in.';
-      if (btnLogout) btnLogout.classList.add('hidden');
-    }
-
-      sidebarDot.className = 'w-3 h-3 rounded-full bg-amber-500';
-      sidebarName.innerText = 'Not Connected';
-      sidebarSub.innerText = 'Connect Telegram';
-
-      setupDot.className = 'w-3.5 h-3.5 rounded-full bg-slate-500';
-      setupTitle.innerText = 'Disconnected';
-      setupDesc.innerText = 'Enter your Telegram credentials below to sign in.';
+      if (setupDot) setupDot.className = 'w-3.5 h-3.5 rounded-full bg-slate-500';
+      if (setupTitle) setupTitle.innerText = 'Disconnected';
+      if (setupDesc) setupDesc.innerText = 'Enter your Telegram credentials below to sign in.';
       if (btnLogout) btnLogout.classList.add('hidden');
     }
 
     // Live scout button state
-    updateLiveScoutUI(data.live_scout_active);
+    if (data.live_scout_active !== undefined) {
+      updateLiveScoutUI(data.live_scout_active);
+    }
 
   } catch (err) {
     console.error('Status check failed:', err);
@@ -268,17 +302,19 @@ async function checkStatus() {
 
 async function handleSendCode(e) {
   e.preventDefault();
-  const apiId = document.getElementById('apiIdInput').value;
-  const apiHash = document.getElementById('apiHashInput').value;
-  const phone = document.getElementById('phoneInput').value;
+  const apiId = document.getElementById('apiIdInput')?.value;
+  const apiHash = document.getElementById('apiHashInput')?.value;
+  const phone = document.getElementById('phoneInput')?.value;
 
-  if (apiId) localStorage.setItem('TG_API_ID', apiId);
-  if (apiHash) localStorage.setItem('TG_API_HASH', apiHash);
-  if (phone) localStorage.setItem('TG_PHONE', phone);
+  if (apiId) storage.set('TG_API_ID', apiId);
+  if (apiHash) storage.set('TG_API_HASH', apiHash);
+  if (phone) storage.set('TG_PHONE', phone);
 
   const btn = document.getElementById('btnRequestCode');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Sending OTP...';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Sending OTP...';
+  }
 
   try {
     const res = await fetch('/api/auth/send-code', {
@@ -296,19 +332,23 @@ async function handleSendCode(e) {
   } catch (err) {
     showNotification(err.message, 'error');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<span>Send Login Code to Telegram</span> <i class="fa-solid fa-arrow-right"></i>';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span>Send Login Code to Telegram</span> <i class="fa-solid fa-arrow-right"></i>';
+    }
   }
 }
 
 async function handleVerifyCode(e) {
   e.preventDefault();
-  const code = document.getElementById('otpCodeInput').value;
-  const password = document.getElementById('twoFactorPasswordInput').value;
+  const code = document.getElementById('otpCodeInput')?.value;
+  const password = document.getElementById('twoFactorPasswordInput')?.value;
   const btn = document.getElementById('btnSubmitOtp');
 
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Verifying...';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Verifying...';
+  }
 
   try {
     const res = await fetch('/api/auth/verify-code', {
@@ -319,18 +359,19 @@ async function handleVerifyCode(e) {
     const data = await res.json();
 
     if (data.need_2fa) {
-      document.getElementById('twoFactorField').classList.remove('hidden');
+      const tfField = document.getElementById('twoFactorField');
+      if (tfField) tfField.classList.remove('hidden');
       showNotification('Your account has Two-Factor Authentication. Please enter your 2FA password.', 'warning');
     } else if (data.success) {
       if (data.session_string) {
-        localStorage.setItem('TG_SESSION_STRING', data.session_string);
+        storage.set('TG_SESSION_STRING', data.session_string);
       }
-      const curApiId = document.getElementById('apiIdInput')?.value || localStorage.getItem('TG_API_ID');
-      const curApiHash = document.getElementById('apiHashInput')?.value || localStorage.getItem('TG_API_HASH');
-      const curPhone = document.getElementById('phoneInput')?.value || localStorage.getItem('TG_PHONE');
-      if (curApiId) localStorage.setItem('TG_API_ID', curApiId);
-      if (curApiHash) localStorage.setItem('TG_API_HASH', curApiHash);
-      if (curPhone) localStorage.setItem('TG_PHONE', curPhone);
+      const curApiId = document.getElementById('apiIdInput')?.value || storage.get('TG_API_ID');
+      const curApiHash = document.getElementById('apiHashInput')?.value || storage.get('TG_API_HASH');
+      const curPhone = document.getElementById('phoneInput')?.value || storage.get('TG_PHONE');
+      if (curApiId) storage.set('TG_API_ID', curApiId);
+      if (curApiHash) storage.set('TG_API_HASH', curApiHash);
+      if (curPhone) storage.set('TG_PHONE', curPhone);
 
       closeModal('otpModal');
       showNotification(`Successfully logged into Telegram! Permanent session saved.`, 'success');
@@ -344,19 +385,21 @@ async function handleVerifyCode(e) {
   } catch (err) {
     showNotification(err.message, 'error');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = 'Confirm & Log In';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = 'Confirm & Log In';
+    }
   }
 }
 
 async function logoutTelegram() {
   if (!confirm('Are you sure you want to log out of Telegram?')) return;
   try {
-    localStorage.removeItem('TG_SESSION_STRING');
-    localStorage.removeItem('TG_USER_INFO');
-    localStorage.removeItem('TG_API_ID');
-    localStorage.removeItem('TG_API_HASH');
-    localStorage.removeItem('TG_PHONE');
+    storage.remove('TG_SESSION_STRING');
+    storage.remove('TG_USER_INFO');
+    storage.remove('TG_API_ID');
+    storage.remove('TG_API_HASH');
+    storage.remove('TG_PHONE');
     const res = await fetch('/api/auth/logout', { method: 'POST' });
     const data = await res.json();
     if (data.success) {
@@ -374,19 +417,19 @@ const TEMPLATES_STORAGE_KEY = 'PHOBIA_USER_TEMPLATES_BACKUP';
 async function loadTemplates() {
   try {
     const res = await fetch('/api/templates');
+    if (!res.ok) throw new Error('Templates endpoint returned ' + res.status);
     const serverTemplates = await res.json();
     
-    // Read local browser backup
+    // Read local browser backup safely
     let localBackup = [];
     try {
-      localBackup = JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || '[]');
+      localBackup = JSON.parse(storage.get(TEMPLATES_STORAGE_KEY) || '[]');
     } catch (e) {
       localBackup = [];
     }
 
     // Check if any template from browser local backup is missing on the server
-    // (This happens if Render restarted and wiped its ephemeral container disk)
-    const serverNames = new Set(serverTemplates.map(t => (t.name || '').trim().toLowerCase()));
+    const serverNames = new Set((serverTemplates || []).map(t => (t.name || '').trim().toLowerCase()));
     const missingOnServer = localBackup.filter(lt => {
       const name = (lt.name || '').trim().toLowerCase();
       return name && !serverNames.has(name);
@@ -403,7 +446,7 @@ async function loadTemplates() {
         const syncData = await syncRes.json();
         if (syncData.success && syncData.templates) {
           state.templates = syncData.templates;
-          localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(state.templates));
+          storage.set(TEMPLATES_STORAGE_KEY, JSON.stringify(state.templates));
           renderTemplatesList();
           renderTemplatePickers();
           return;
@@ -414,16 +457,15 @@ async function loadTemplates() {
     }
 
     // Update state and refresh local backup with server templates
-    state.templates = serverTemplates;
-    if (serverTemplates.length > 0) {
-      // Merge with any unique local templates so nothing is lost
-      const merged = [...serverTemplates];
+    state.templates = serverTemplates || [];
+    if (state.templates.length > 0) {
+      const merged = [...state.templates];
       for (const lt of localBackup) {
         if (!merged.some(m => (m.name || '').trim().toLowerCase() === (lt.name || '').trim().toLowerCase())) {
           merged.push(lt);
         }
       }
-      localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(merged));
+      storage.set(TEMPLATES_STORAGE_KEY, JSON.stringify(merged));
     }
     
     renderTemplatesList();
@@ -431,7 +473,7 @@ async function loadTemplates() {
   } catch (err) {
     console.error('Failed to load templates from server, falling back to local storage:', err);
     try {
-      const localBackup = JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || '[]');
+      const localBackup = JSON.parse(storage.get(TEMPLATES_STORAGE_KEY) || '[]');
       if (localBackup.length > 0) {
         state.templates = localBackup;
         renderTemplatesList();
@@ -562,18 +604,18 @@ async function previewSpintaxDirect(templateId) {
 }
 
 async function saveTemplate() {
-  const editId = document.getElementById('editTemplateId').value;
-  const name = document.getElementById('tplNameInput').value.trim();
-  const content = document.getElementById('tplContentInput').value.trim();
+  const editId = document.getElementById('editTemplateId')?.value;
+  const name = document.getElementById('tplNameInput')?.value?.trim();
+  const content = document.getElementById('tplContentInput')?.value?.trim();
 
   if (!name || !content) {
     showNotification('Template name and content are required', 'warning');
     return;
   }
 
-  // Tier 1: Immediately save to browser localStorage so it's NEVER lost
+  // Tier 1: Immediately save to safe browser storage so it's NEVER lost
   try {
-    let localBackup = JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || '[]');
+    let localBackup = JSON.parse(storage.get(TEMPLATES_STORAGE_KEY) || '[]');
     if (editId) {
       const idx = localBackup.findIndex(t => String(t.id) === String(editId) || (t.name || '').toLowerCase() === name.toLowerCase());
       if (idx >= 0) {
@@ -586,9 +628,9 @@ async function saveTemplate() {
     } else {
       localBackup.push({ name, content, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     }
-    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(localBackup));
+    storage.set(TEMPLATES_STORAGE_KEY, JSON.stringify(localBackup));
   } catch (e) {
-    console.warn('LocalStorage save warning:', e);
+    console.warn('Storage save warning:', e);
   }
 
   const url = editId ? `/api/templates/${editId}` : '/api/templates';
@@ -635,11 +677,11 @@ async function deleteTemplateItem(id) {
   const tName = t ? t.name : 'this template';
   if (!confirm(`Are you sure you want to delete "${tName}"?`)) return;
 
-  // Remove from localStorage
+  // Remove from storage
   try {
-    let localBackup = JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || '[]');
+    let localBackup = JSON.parse(storage.get(TEMPLATES_STORAGE_KEY) || '[]');
     localBackup = localBackup.filter(item => item.id !== id && (item.name || '').toLowerCase() !== (tName || '').toLowerCase());
-    localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(localBackup));
+    storage.set(TEMPLATES_STORAGE_KEY, JSON.stringify(localBackup));
   } catch (e) {}
 
   try {
@@ -655,7 +697,7 @@ async function deleteTemplateItem(id) {
 }
 
 function exportTemplatesBackup() {
-  const templates = state.templates.length > 0 ? state.templates : JSON.parse(localStorage.getItem(TEMPLATES_STORAGE_KEY) || '[]');
+  const templates = state.templates.length > 0 ? state.templates : JSON.parse(storage.get(TEMPLATES_STORAGE_KEY) || '[]');
   if (templates.length === 0) {
     showNotification('No templates found to export', 'warning');
     return;
@@ -1404,13 +1446,32 @@ async function clearAllLeads() {
 async function loadStats() {
   try {
     const res = await fetch('/api/stats');
+    if (!res.ok) return;
     const data = await res.json();
-    document.getElementById('kpiLeads').innerText = data.leads_count || 0;
-    document.getElementById('kpiPosts').innerText = data.posts_sent || 0;
-    document.getElementById('kpiTemplates').innerText = data.templates_count || 0;
-    document.getElementById('kpiActiveCampaigns').innerText = data.active_campaigns || 0;
+    
+    const kpiLeads = document.getElementById('kpiLeads');
+    if (kpiLeads && data.leads_count !== undefined) kpiLeads.innerText = data.leads_count;
+    
+    const kpiPosts = document.getElementById('kpiPosts');
+    if (kpiPosts && data.posts_sent !== undefined) kpiPosts.innerText = data.posts_sent;
+    
+    const kpiTemplates = document.getElementById('kpiTemplates');
+    if (kpiTemplates && data.templates_count !== undefined) kpiTemplates.innerText = data.templates_count;
+    
+    const kpiActiveCampaigns = document.getElementById('kpiActiveCampaigns');
+    if (kpiActiveCampaigns && data.active_campaigns !== undefined) kpiActiveCampaigns.innerText = data.active_campaigns;
+    
     const kpiGroups = document.getElementById('kpiGroups');
-    if (kpiGroups) kpiGroups.innerText = state.groups.length || 0;
+    if (kpiGroups) {
+      if (data.groups_count !== undefined && data.groups_count > 0) {
+        kpiGroups.innerText = data.groups_count;
+      } else if (state.groups.length > 0) {
+        kpiGroups.innerText = state.groups.length;
+      }
+    }
+
+    const badgeLead = document.getElementById('badgeLeadCount');
+    if (badgeLead && data.leads_count !== undefined) badgeLead.innerText = data.leads_count;
   } catch (err) {
     console.error('Failed to load stats:', err);
   }
@@ -1419,11 +1480,12 @@ async function loadStats() {
 async function loadLogs() {
   try {
     const res = await fetch('/api/logs?limit=50');
+    if (!res.ok) return;
     const logs = await res.json();
     const consoleEl = document.getElementById('logsConsole');
     if (!consoleEl) return;
 
-    if (logs.length === 0) {
+    if (!Array.isArray(logs) || logs.length === 0) {
       consoleEl.innerHTML = `<div class="text-slate-500 italic">No logs recorded yet.</div>`;
       return;
     }
@@ -1436,9 +1498,9 @@ async function loadLogs() {
 
       return `
         <div class="leading-relaxed flex items-start space-x-2">
-          <span class="text-slate-500 text-[10px] select-none">[${l.timestamp}]</span>
-          <span class="text-[10px] px-1.5 rounded font-bold ${colorClass} bg-slate-900 border border-slate-800">[${l.category}]</span>
-          <span class="${colorClass}">${escapeHtml(l.message)}</span>
+          <span class="text-slate-500 text-[10px] select-none">[${escapeHtml(l.timestamp || '')}]</span>
+          <span class="text-[10px] px-1.5 rounded font-bold ${colorClass} bg-slate-900 border border-slate-800">[${escapeHtml(l.category || '')}]</span>
+          <span class="${colorClass}">${escapeHtml(l.message || '')}</span>
         </div>
       `;
     }).join('');

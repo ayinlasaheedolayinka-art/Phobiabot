@@ -395,12 +395,16 @@ def get_dashboard_stats():
     posts_sent = conn.execute("SELECT COALESCE(SUM(posts_sent), 0) as c FROM campaigns").fetchone()["c"]
     conn.close()
 
+    tg = TelegramManager.get_instance()
+    groups_count = len(getattr(tg, "_cached_groups", []))
+
     return {
         "leads_count": leads_count,
         "templates_count": templates_count,
         "campaigns_count": campaigns_count,
         "active_campaigns": active_campaigns,
-        "posts_sent": posts_sent
+        "posts_sent": posts_sent,
+        "groups_count": groups_count
     }
 
 @app.get("/api/logs")
