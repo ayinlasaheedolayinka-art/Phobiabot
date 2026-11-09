@@ -336,6 +336,8 @@ async function handleVerifyCode(e) {
       showNotification(`Successfully logged into Telegram! Permanent session saved.`, 'success');
       await checkStatus();
       await loadGroups();
+      await loadStats();
+      switchTab('tab-dashboard');
     } else {
       showNotification(data.detail || data.error || 'Verification failed', 'error');
     }
