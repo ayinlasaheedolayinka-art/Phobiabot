@@ -209,9 +209,9 @@ def sync_templates(req: TemplateSyncRequest):
 
 # ----------------- GROUPS & DIALOGS ROUTES -----------------
 @app.get("/api/groups")
-async def get_groups():
+async def get_groups(refresh: bool = False):
     tg = TelegramManager.get_instance()
-    groups = await tg.get_dialogs_and_groups()
+    groups = await tg.get_dialogs_and_groups(force_refresh=refresh)
     return {"groups": groups, "count": len(groups)}
 
 # ----------------- CAMPAIGN / AUTO-POSTER ROUTES -----------------
@@ -397,6 +397,10 @@ def get_dashboard_stats():
 
     tg = TelegramManager.get_instance()
     groups_count = len(getattr(tg, "_cached_groups", []))
+    if groups_count == 0:
+        saved_count = get_setting("cached_groups_count")
+        if saved_count and str(saved_count).isdigit():
+            groups_count = int(saved_count)
 
     return {
         "leads_count": leads_count,

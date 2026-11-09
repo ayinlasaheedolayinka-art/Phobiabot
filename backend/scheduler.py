@@ -133,14 +133,23 @@ class CampaignScheduler:
             all_templates = get_templates()
             template_ids = [t["id"] for t in all_templates]
 
+        # Live fresh lookup from Telegram so ALL newly joined groups are discovered
+        all_groups = await tg.get_dialogs_and_groups(force_refresh=True)
+        active_group_map = {g["id"]: g for g in all_groups}
+        all_live_ids = [g["id"] for g in all_groups]
+
         # If target groups is empty or ["all"], dynamically resolve all joined groups
         is_all_groups = False
         if not target_groups_raw or target_groups_raw == ["all"] or "all" in target_groups_raw:
             is_all_groups = True
-            all_groups = await tg.get_dialogs_and_groups()
-            group_ids = [g["id"] for g in all_groups]
+            group_ids = all_live_ids
         else:
-            group_ids = [int(gid) for gid in target_groups_raw if str(gid).isdigit() or (isinstance(gid, int))]
+            selected_ids = [int(gid) for gid in target_groups_raw if str(gid).isdigit() or (isinstance(gid, int))]
+            # Automatically include any newly joined groups so new groups are always broadcasted to!
+            group_ids = list(dict.fromkeys(selected_ids + all_live_ids))
+
+        # Filter strictly to currently joined postable groups
+        group_ids = [gid for gid in group_ids if gid in active_group_map]
 
         if not template_ids:
             log_activity("WARNING", "POSTER", f"Campaign '{camp_name}' has no templates. Please create at least one content template.")
@@ -157,7 +166,7 @@ class CampaignScheduler:
         update_campaign_status(camp_id, "running", last_run=now_str, next_run=next_dt.isoformat())
 
         interval_display = f"{campaign.get('interval_val', 30)} {campaign.get('interval_unit', 'minutes')}"
-        scope_display = f"ALL {len(group_ids)} joined groups" if is_all_groups else f"{len(group_ids)} selected groups"
+        scope_display = f"ALL {len(group_ids)} Telegram groups (including newly joined groups)"
         log_activity("INFO", "POSTER", f"🚀 Starting broadcast round for '{camp_name}' to {scope_display}. Interval: every {interval_display}.")
 
         delay_min = max(3, int(campaign.get("delay_min", 10)))

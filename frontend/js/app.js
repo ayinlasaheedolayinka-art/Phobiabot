@@ -750,12 +750,17 @@ async function handleImportTemplates(event) {
 }
 
 // ----------------- GROUPS -----------------
-async function loadGroups() {
+async function loadGroups(force = false) {
   try {
-    const res = await fetch('/api/groups');
+    const url = force ? '/api/groups?refresh=true' : '/api/groups';
+    const res = await fetch(url);
+    if (!res.ok) return;
     const data = await res.json();
     state.groups = data.groups || [];
     renderGroupPickers();
+    if (force) {
+      showNotification(`Refreshed! Discovered ${state.groups.length} Telegram groups (channels strictly excluded).`, 'success');
+    }
   } catch (err) {
     console.error('Failed to load groups:', err);
   }
@@ -791,7 +796,7 @@ function renderGroupPickers() {
       <label class="flex items-center space-x-2.5 p-2 rounded-lg hover:bg-slate-800 cursor-pointer">
         <input type="checkbox" name="campGroup" value="${g.id}" class="rounded bg-slate-900 border-darkBorder text-brand-500 focus:ring-0" />
         <span class="text-xs text-slate-200 truncate flex-1">${escapeHtml(g.title)}</span>
-        <span class="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">${g.member_count || 0} users</span>
+        <span class="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">${g.member_count || 0} members</span>
       </label>
     `).join('');
   }

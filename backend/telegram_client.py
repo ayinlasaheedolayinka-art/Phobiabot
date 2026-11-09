@@ -21,6 +21,7 @@ SESSION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 os.makedirs(SESSION_DIR, exist_ok=True)
 SESSION_FILE = os.path.join(SESSION_DIR, "scout_user.session")
 SESSION_STR_FILE = os.path.join(SESSION_DIR, "session_string.txt")
+CREDS_FILE = os.path.join(SESSION_DIR, "credentials_backup.json")
 
 class TelegramManager:
     _instance = None
@@ -59,6 +60,18 @@ class TelegramManager:
             except Exception:
                 pass
 
+        # Fallback to credentials backup file if DB was wiped on restart
+        if (not api_id or not api_hash or not session_str) and os.path.exists(CREDS_FILE):
+            try:
+                with open(CREDS_FILE, "r") as f:
+                    cdata = json.load(f)
+                    api_id = api_id or cdata.get("api_id")
+                    api_hash = api_hash or cdata.get("api_hash")
+                    phone = phone or cdata.get("phone")
+                    session_str = session_str or cdata.get("session_string")
+            except Exception:
+                pass
+
         try:
             api_id = int(api_id) if api_id else None
         except (ValueError, TypeError):
@@ -73,6 +86,27 @@ class TelegramManager:
                     f.write(session_str)
             except Exception:
                 pass
+            self._save_credentials_backup(session_str=session_str)
+
+    def _save_credentials_backup(self, api_id: Optional[int] = None, api_hash: Optional[str] = None, phone: Optional[str] = None, session_str: Optional[str] = None):
+        try:
+            current = {}
+            if os.path.exists(CREDS_FILE):
+                try:
+                    with open(CREDS_FILE, "r") as f:
+                        current = json.load(f)
+                except Exception:
+                    current = {}
+
+            if api_id: current["api_id"] = api_id
+            if api_hash: current["api_hash"] = api_hash
+            if phone: current["phone"] = phone
+            if session_str: current["session_string"] = session_str
+
+            with open(CREDS_FILE, "w") as f:
+                json.dump(current, f)
+        except Exception:
+            pass
 
     async def get_client(self) -> Optional[TelegramClient]:
         if self.client:
@@ -251,6 +285,7 @@ class TelegramManager:
 
         session_str = session_str.strip()
         self._save_session_string(session_str)
+        self._save_credentials_backup(api_id=api_id_val, api_hash=api_hash_val, phone=phone_val, session_str=session_str)
 
         # Disconnect any old instance
         if self.client and self.client.is_connected():
@@ -391,9 +426,9 @@ class TelegramManager:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def get_dialogs_and_groups(self) -> List[Dict[str, Any]]:
-        # Fast cache check (valid for 60 seconds)
-        if self._cached_groups and (time.time() - self._cached_groups_time < 60):
+    async def get_dialogs_and_groups(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        # Fast cache check (valid for 30 seconds unless force_refresh is requested)
+        if not force_refresh and self._cached_groups and (time.time() - self._cached_groups_time < 30):
             return self._cached_groups
 
         client = await self.get_client()
@@ -402,22 +437,42 @@ class TelegramManager:
 
         groups = []
         try:
-            async for dialog in client.iter_dialogs():
+            # Iterate through all dialogs on the user's account without limit
+            async for dialog in client.iter_dialogs(limit=None):
                 entity = dialog.entity
-                if dialog.is_group or dialog.is_channel:
-                    member_count = getattr(entity, 'participants_count', 0)
-                    groups.append({
-                        "id": dialog.id,
-                        "title": dialog.name or "Untitled Group",
-                        "username": getattr(entity, 'username', None),
-                        "is_group": dialog.is_group,
-                        "is_channel": dialog.is_channel,
-                        "unread_count": dialog.unread_count,
-                        "member_count": member_count
-                    })
+                
+                # Check whether entity is a broadcast channel
+                is_broadcast = getattr(entity, 'broadcast', False)
+                # Check whether entity is a group, supergroup, or gigagroup
+                is_megagroup = getattr(entity, 'megagroup', False)
+                is_gigagroup = getattr(entity, 'gigagroup', False)
+                is_real_group = bool(dialog.is_group or is_megagroup or is_gigagroup)
+
+                # STRICT RULE: GROUPS ONLY, NEVER BROADCAST CHANNELS
+                if is_real_group and not is_broadcast:
+                    # Check whether regular members are banned from sending messages in this group
+                    posting_restricted = False
+                    if hasattr(entity, 'default_banned_rights') and entity.default_banned_rights:
+                        if getattr(entity.default_banned_rights, 'send_messages', False):
+                            if not getattr(entity, 'admin_rights', None) and not getattr(entity, 'creator', False):
+                                posting_restricted = True
+
+                    if not posting_restricted:
+                        member_count = getattr(entity, 'participants_count', 0)
+                        groups.append({
+                            "id": dialog.id,
+                            "title": dialog.name or "Untitled Group",
+                            "username": getattr(entity, 'username', None),
+                            "is_group": True,
+                            "is_channel": False,
+                            "unread_count": dialog.unread_count,
+                            "member_count": member_count
+                        })
+
             if groups:
                 self._cached_groups = groups
                 self._cached_groups_time = time.time()
+                set_setting("cached_groups_count", str(len(groups)))
         except Exception as e:
             log_activity("ERROR", "TELEGRAM", f"Error fetching groups: {str(e)}")
             if self._cached_groups:
@@ -430,15 +485,20 @@ class TelegramManager:
         if not client or not await client.is_user_authorized():
             return {"success": False, "error": "Telegram client is not authorized"}
 
-        me = await client.get_me()
-        rendered_text = render_template(template_text, {
-            "username": me.username or me.first_name or "Me",
-            "first_name": me.first_name or "",
-        })
-
         try:
             entity = await client.get_entity(group_id_or_username)
             entity_name = getattr(entity, 'title', str(group_id_or_username))
+
+            # Strictly avoid channels - groups only!
+            if getattr(entity, 'broadcast', False):
+                log_activity("INFO", "POSTER", f"Skipped broadcast channel '{entity_name}' (groups-only policy)")
+                return {"success": False, "error": "Skipped: channel not group"}
+
+            me = await client.get_me()
+            rendered_text = render_template(template_text, {
+                "username": me.username or me.first_name or "Me",
+                "first_name": me.first_name or "",
+            })
             
             msg = await client.send_message(entity, rendered_text)
             log_activity("SUCCESS", "POSTER", f"Posted message to '{entity_name}' (Msg ID: {msg.id})")

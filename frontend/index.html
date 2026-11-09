@@ -140,12 +140,12 @@
         <div class="bg-darkCard border border-darkBorder p-5 rounded-2xl relative overflow-hidden">
           <div class="flex items-center justify-between">
             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Telegram Groups</p>
-            <div class="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center">
-              <i class="fa-solid fa-users text-lg"></i>
-            </div>
+            <button onclick="loadGroups(true)" title="Refresh & scan newly joined groups" class="w-8 h-8 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 flex items-center justify-center transition">
+              <i class="fa-solid fa-arrows-rotate text-xs"></i>
+            </button>
           </div>
           <p id="kpiGroups" class="text-3xl font-extrabold mt-3 text-blue-400">0</p>
-          <p class="text-xs text-slate-400 mt-1">Total joined groups</p>
+          <p class="text-xs text-slate-400 mt-1">Total joined groups (channels excluded)</p>
         </div>
 
         <div class="bg-darkCard border border-darkBorder p-5 rounded-2xl relative overflow-hidden">
@@ -295,8 +295,8 @@
               <span class="text-xs text-slate-300 font-medium">Telegram Groups:</span>
               <span id="posterTotalGroupsBadge" class="text-xs font-bold text-brand-400 bg-brand-950/60 px-2 py-0.5 rounded-lg border border-brand-800/40">0 Groups</span>
             </div>
-            <button onclick="loadGroups()" title="Refresh Telegram Groups" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition">
-              <i class="fa-solid fa-rotate-right"></i>
+            <button onclick="loadGroups(true)" title="Scan & refresh for newly joined groups" class="px-3 py-2 rounded-xl bg-brand-600/20 hover:bg-brand-600/30 text-brand-300 border border-brand-500/40 text-xs font-bold flex items-center gap-1.5 transition">
+              <i class="fa-solid fa-arrows-rotate"></i> Scan New Groups
             </button>
           </div>
         </div>
@@ -344,7 +344,7 @@
               <label class="text-[11px] text-slate-400 block mb-1">Target Telegram Groups:</label>
               <div class="p-2.5 rounded-xl bg-brand-950/40 border border-brand-800/40 text-xs text-brand-300 font-medium flex items-center gap-2">
                 <i class="fa-solid fa-circle-check text-brand-400 text-sm"></i>
-                <span>Auto-Post to <strong>ALL <span id="quickTargetCountText">0</span> joined groups</strong> automatically</span>
+                <span>Auto-Post to <strong>ALL <span id="quickTargetCountText">0</span> joined groups</strong> (auto-includes newly joined groups, channels excluded)</span>
               </div>
             </div>
 
