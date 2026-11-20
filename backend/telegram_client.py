@@ -343,29 +343,31 @@ class TelegramManager:
             return {"success": True, "user": user, "session_string": session_str}
 
     async def request_code(self, api_id: int, api_hash: str, phone: str) -> Dict[str, Any]:
-        phone = phone.strip().replace(" ", "").replace("-", "")
-        if not phone.startswith("+"):
-            phone = "+" + phone
-        set_setting("api_id", api_id)
-        set_setting("api_hash", api_hash)
-        set_setting("phone", phone)
-
-        if self.client and self.client.is_connected():
-            try:
-                await self.client.disconnect()
-            except Exception:
-                pass
-
-        # Initialize fresh StringSession
-        self.client = TelegramClient(StringSession(""), api_id, api_hash, auto_reconnect=True)
-        await self.client.connect()
-
         try:
+            api_id_val = int(api_id) if (api_id and int(api_id) > 0) else 21040435
+            api_hash_val = str(api_hash).strip() if (api_hash and str(api_hash).strip()) else "2d19c05868a10c46c95b6646710f1e73"
+            phone = phone.strip().replace(" ", "").replace("-", "")
+            if not phone.startswith("+"):
+                phone = "+" + phone
+            set_setting("api_id", api_id_val)
+            set_setting("api_hash", api_hash_val)
+            set_setting("phone", phone)
+
+            if self.client and self.client.is_connected():
+                try:
+                    await asyncio.wait_for(self.client.disconnect(), timeout=3.0)
+                except Exception:
+                    pass
+
+            # Initialize fresh StringSession
+            self.client = TelegramClient(StringSession(""), api_id_val, api_hash_val, auto_reconnect=True)
+            await asyncio.wait_for(self.client.connect(), timeout=12.0)
+
             res = await self.client.send_code_request(phone)
             self.phone_code_hash = res.phone_code_hash
             self.temp_phone = phone
-            self.temp_api_id = api_id
-            self.temp_api_hash = api_hash
+            self.temp_api_id = api_id_val
+            self.temp_api_hash = api_hash_val
             log_activity("INFO", "AUTH", f"Telegram login OTP requested for {phone}")
             return {"success": True, "message": "Verification code sent to your Telegram account / SMS"}
         except Exception as e:
@@ -425,33 +427,44 @@ class TelegramManager:
             return {"success": False, "error": str(e)}
 
     async def request_qr_code(self, api_id: int, api_hash: str) -> Dict[str, Any]:
-        if hasattr(self, "_qr_task") and self._qr_task and not self._qr_task.done():
-            self._qr_task.cancel()
-        
-        if self.client and self.client.is_connected():
-            try:
-                await self.client.disconnect()
-            except Exception:
-                pass
+        try:
+            api_id_val = int(api_id) if (api_id and int(api_id) > 0) else 21040435
+            api_hash_val = str(api_hash).strip() if (api_hash and str(api_hash).strip()) else "2d19c05868a10c46c95b6646710f1e73"
 
-        self.temp_api_id = api_id
-        self.temp_api_hash = api_hash
-        self.client = TelegramClient(StringSession(""), api_id, api_hash, auto_reconnect=True)
-        await self.client.connect()
-        self.qr_instance = await self.client.qr_login()
-        self.qr_url = self.qr_instance.url
-        self.qr_done = False
-        self.qr_need_2fa = False
-        self.qr_error = None
-        self.qr_user = None
+            if hasattr(self, "_qr_task") and self._qr_task and not self._qr_task.done():
+                self._qr_task.cancel()
+                try:
+                    await asyncio.wait_for(self._qr_task, timeout=1.0)
+                except Exception:
+                    pass
+            
+            if self.client and self.client.is_connected():
+                try:
+                    await asyncio.wait_for(self.client.disconnect(), timeout=3.0)
+                except Exception:
+                    pass
 
-        self._qr_task = asyncio.create_task(self._qr_worker())
-        log_activity("INFO", "AUTH", "Started continuous Telegram QR login listener task")
-        return {
-            "success": True,
-            "url": self.qr_instance.url,
-            "expires": self.qr_instance.expires.isoformat() if getattr(self.qr_instance, "expires", None) else None
-        }
+            self.temp_api_id = api_id_val
+            self.temp_api_hash = api_hash_val
+            self.client = TelegramClient(StringSession(""), api_id_val, api_hash_val, auto_reconnect=True)
+            await asyncio.wait_for(self.client.connect(), timeout=12.0)
+            self.qr_instance = await self.client.qr_login()
+            self.qr_url = self.qr_instance.url
+            self.qr_done = False
+            self.qr_need_2fa = False
+            self.qr_error = None
+            self.qr_user = None
+
+            self._qr_task = asyncio.create_task(self._qr_worker())
+            log_activity("INFO", "AUTH", "Started continuous Telegram QR login listener task")
+            return {
+                "success": True,
+                "url": self.qr_instance.url,
+                "expires": self.qr_instance.expires.isoformat() if getattr(self.qr_instance, "expires", None) else None
+            }
+        except Exception as e:
+            log_activity("ERROR", "AUTH", f"Failed to start QR login: {str(e)}")
+            return {"success": False, "error": f"Failed to connect to Telegram: {str(e)}"}
 
     async def _qr_worker(self):
         while not self.qr_done and getattr(self, "qr_instance", None):
@@ -463,22 +476,24 @@ class TelegramManager:
                 
                 saved_str = self.client.session.save()
                 me = await self.client.get_me()
+                user_phone = me.phone or getattr(user, 'phone', None) or ""
                 self._cached_user = {
                     "id": me.id,
                     "first_name": me.first_name or "",
                     "last_name": me.last_name or "",
                     "username": me.username or "",
-                    "phone": me.phone or ""
+                    "phone": user_phone
                 }
                 self._last_user_check = time.time()
                 set_setting("user_info", json.dumps(self._cached_user))
                 set_setting("is_connected", "1")
                 self._start_keep_alive()
 
-                api_id_val = int(getattr(self, "temp_api_id", 0) or get_setting("api_id") or 0)
-                api_hash_val = getattr(self, "temp_api_hash", "") or get_setting("api_hash") or ""
+                api_id_val = int(getattr(self, "temp_api_id", 0) or get_setting("api_id") or 21040435)
+                api_hash_val = getattr(self, "temp_api_hash", "") or get_setting("api_hash") or "2d19c05868a10c46c95b6646710f1e73"
+                phone_identifier = user_phone or f"user_{me.id}"
                 save_or_update_account(
-                    phone=self._cached_user.get("phone") or "qr_account",
+                    phone=phone_identifier,
                     api_id=api_id_val,
                     api_hash=api_hash_val,
                     session_string=saved_str,
@@ -534,22 +549,24 @@ class TelegramManager:
                 user = await self.client.sign_in(password=password)
                 saved_str = self.client.session.save()
                 me = await self.client.get_me()
+                user_phone = me.phone or getattr(user, 'phone', None) or ""
                 self._cached_user = {
                     "id": me.id,
                     "first_name": me.first_name or "",
                     "last_name": me.last_name or "",
                     "username": me.username or "",
-                    "phone": me.phone or ""
+                    "phone": user_phone
                 }
                 self._last_user_check = time.time()
                 set_setting("user_info", json.dumps(self._cached_user))
                 set_setting("is_connected", "1")
                 self._start_keep_alive()
 
-                api_id_val = int(getattr(self, "temp_api_id", 0) or get_setting("api_id") or 0)
-                api_hash_val = getattr(self, "temp_api_hash", "") or get_setting("api_hash") or ""
+                api_id_val = int(getattr(self, "temp_api_id", 0) or get_setting("api_id") or 21040435)
+                api_hash_val = getattr(self, "temp_api_hash", "") or get_setting("api_hash") or "2d19c05868a10c46c95b6646710f1e73"
+                phone_identifier = user_phone or f"user_{me.id}"
                 save_or_update_account(
-                    phone=self._cached_user.get("phone") or "qr_account",
+                    phone=phone_identifier,
                     api_id=api_id_val,
                     api_hash=api_hash_val,
                     session_string=saved_str,

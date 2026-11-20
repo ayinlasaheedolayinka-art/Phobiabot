@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -52,8 +52,8 @@ app.add_middleware(
 
 # Pydantic Schemas
 class SendCodeRequest(BaseModel):
-    api_id: int
-    api_hash: str
+    api_id: Optional[int] = 21040435
+    api_hash: Optional[str] = "2d19c05868a10c46c95b6646710f1e73"
     phone: str
 
 class VerifyCodeRequest(BaseModel):
@@ -61,8 +61,8 @@ class VerifyCodeRequest(BaseModel):
     password: Optional[str] = None
 
 class QRStartRequest(BaseModel):
-    api_id: int
-    api_hash: str
+    api_id: Optional[int] = 21040435
+    api_hash: Optional[str] = "2d19c05868a10c46c95b6646710f1e73"
 
 class QRCheckRequest(BaseModel):
     password: Optional[str] = None
@@ -151,35 +151,51 @@ async def get_system_status():
 
 @app.post("/api/auth/send-code")
 async def send_code(req: SendCodeRequest):
-    tg = TelegramManager.get_instance()
-    res = await tg.request_code(req.api_id, req.api_hash, req.phone)
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("error", "Failed to send code"))
-    return res
+    try:
+        tg = TelegramManager.get_instance()
+        api_id = req.api_id if (req.api_id and req.api_id > 0) else 21040435
+        api_hash = (req.api_hash or "").strip() or "2d19c05868a10c46c95b6646710f1e73"
+        res = await tg.request_code(api_id, api_hash, req.phone)
+        if not res.get("success"):
+            return JSONResponse(status_code=400, content={"success": False, "error": res.get("error", "Failed to send code")})
+        return JSONResponse(status_code=200, content=res)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "error": f"Failed to send code: {str(e)}"})
 
 @app.post("/api/auth/verify-code")
 async def verify_code(req: VerifyCodeRequest):
-    tg = TelegramManager.get_instance()
-    res = await tg.sign_in_with_code(req.code, req.password)
-    if not res.get("success"):
-        if res.get("need_2fa"):
-            return res
-        raise HTTPException(status_code=400, detail=res.get("error", "Sign-in failed"))
-    return res
+    try:
+        tg = TelegramManager.get_instance()
+        res = await tg.sign_in_with_code(req.code, req.password)
+        if not res.get("success"):
+            if res.get("need_2fa"):
+                return JSONResponse(status_code=200, content=res)
+            return JSONResponse(status_code=400, content={"success": False, "error": res.get("error", "Sign-in failed")})
+        return JSONResponse(status_code=200, content=res)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "error": f"Verification failed: {str(e)}"})
 
 @app.post("/api/auth/qr-start")
 async def qr_start(req: QRStartRequest):
-    tg = TelegramManager.get_instance()
-    res = await tg.request_qr_code(req.api_id, req.api_hash)
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("error", "Failed to start QR login"))
-    return res
+    try:
+        tg = TelegramManager.get_instance()
+        api_id = req.api_id if (req.api_id and req.api_id > 0) else 21040435
+        api_hash = (req.api_hash or "").strip() or "2d19c05868a10c46c95b6646710f1e73"
+        res = await tg.request_qr_code(api_id, api_hash)
+        if not res.get("success"):
+            return JSONResponse(status_code=400, content={"success": False, "error": res.get("error", "Failed to start QR login")})
+        return JSONResponse(status_code=200, content=res)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "error": f"Failed to start QR login: {str(e)}"})
 
 @app.post("/api/auth/qr-check")
 async def qr_check(req: QRCheckRequest):
-    tg = TelegramManager.get_instance()
-    res = await tg.check_qr_login(req.password)
-    return res
+    try:
+        tg = TelegramManager.get_instance()
+        res = await tg.check_qr_login(req.password)
+        return JSONResponse(status_code=200, content=res)
+    except Exception as e:
+        return JSONResponse(status_code=200, content={"success": False, "waiting": True, "error": str(e)})
 
 @app.post("/api/auth/logout")
 async def logout():
@@ -224,11 +240,19 @@ def sync_accounts(req: AccountSyncRequest):
 
 @app.post("/api/accounts/{account_id}/activate")
 async def activate_account(account_id: int):
-    tg = TelegramManager.get_instance()
-    res = await tg.switch_account(account_id)
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("error", "Failed to switch account"))
-    return res
+    try:
+        tg = TelegramManager.get_instance()
+        res = await tg.switch_account(account_id)
+        if not res.get("success"):
+            return JSONResponse(status_code=400, content={"success": False, "error": res.get("error", "Failed to switch account")})
+        active = get_active_account()
+        return JSONResponse(status_code=200, content={
+            "success": True,
+            "active_account": active,
+            "user": res.get("user")
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "error": f"Failed to switch account: {str(e)}"})
 
 @app.delete("/api/accounts/{account_id}")
 async def remove_account(account_id: int):

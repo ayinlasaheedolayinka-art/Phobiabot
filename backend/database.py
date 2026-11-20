@@ -716,7 +716,7 @@ def sync_campaigns_bulk(campaigns_list: List[Dict[str, Any]]) -> List[Dict[str, 
 def get_accounts() -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, phone, api_id, user_id, first_name, last_name, username, is_active, created_at, updated_at FROM telegram_accounts ORDER BY is_active DESC, id ASC")
+    cursor.execute("SELECT id, phone, api_id, api_hash, session_string, user_id, first_name, last_name, username, is_active, created_at, updated_at FROM telegram_accounts ORDER BY is_active DESC, id ASC")
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
     return rows
@@ -871,6 +871,8 @@ def sync_accounts_bulk(accounts_list: List[Dict[str, Any]]) -> List[Dict[str, An
         session_str = (item.get("session_string") or "").strip()
         if not phone or not session_str:
             continue
+        api_id_val = item.get("api_id") or 21040435
+        api_hash_val = item.get("api_hash") or "2d19c05868a10c46c95b6646710f1e73"
         cursor.execute("SELECT id FROM telegram_accounts WHERE phone = ?", (phone,))
         row = cursor.fetchone()
         if row:
@@ -879,8 +881,8 @@ def sync_accounts_bulk(accounts_list: List[Dict[str, Any]]) -> List[Dict[str, An
             SET api_id = ?, api_hash = ?, session_string = ?, user_id = ?, first_name = ?, last_name = ?, username = ?, is_active = ?, updated_at = ?
             WHERE id = ?
             """, (
-                item.get("api_id"),
-                item.get("api_hash"),
+                api_id_val,
+                api_hash_val,
                 session_str,
                 item.get("user_id"),
                 item.get("first_name", ""),
@@ -896,8 +898,8 @@ def sync_accounts_bulk(accounts_list: List[Dict[str, Any]]) -> List[Dict[str, An
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 phone,
-                item.get("api_id"),
-                item.get("api_hash"),
+                api_id_val,
+                api_hash_val,
                 session_str,
                 item.get("user_id"),
                 item.get("first_name", ""),
@@ -908,6 +910,32 @@ def sync_accounts_bulk(accounts_list: List[Dict[str, Any]]) -> List[Dict[str, An
                 item.get("updated_at", now)
             ))
     conn.commit()
+
+    # Ensure at least one account is marked active
+    cursor.execute("SELECT COUNT(*) as count FROM telegram_accounts WHERE is_active = 1")
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("UPDATE telegram_accounts SET is_active = 1 WHERE id = (SELECT id FROM telegram_accounts ORDER BY id ASC LIMIT 1)")
+        conn.commit()
+
+    # Sync active account to settings
+    cursor.execute("SELECT * FROM telegram_accounts WHERE is_active = 1 LIMIT 1")
+    act_row = cursor.fetchone()
+    if act_row:
+        acc = dict(act_row)
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_id', ?)", (str(acc["api_id"]),))
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_hash', ?)", (acc["api_hash"],))
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('phone', ?)", (acc["phone"],))
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('session_string', ?)", (acc["session_string"],))
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('user_info', ?)", (json.dumps({
+            "id": acc["user_id"],
+            "first_name": acc["first_name"],
+            "last_name": acc["last_name"],
+            "username": acc["username"],
+            "phone": acc["phone"]
+        }),))
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('is_connected', '1')")
+        conn.commit()
+
     _export_accounts_internal(cursor)
     conn.close()
     return get_accounts()

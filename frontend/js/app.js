@@ -5,13 +5,16 @@ const RENDER_BACKEND_URL = 'https://phobiabot.onrender.com';
 const storage = {
   get(key) {
     try {
-      return (typeof window !== 'undefined' && window.localStorage) ? window.localStorage.getItem(key) : null;
+      const val = (typeof window !== 'undefined' && window.localStorage) ? window.localStorage.getItem(key) : null;
+      if (val === 'undefined' || val === 'null') return null;
+      return val;
     } catch (e) {
       return null;
     }
   },
   set(key, val) {
     try {
+      if (val === undefined || val === null || val === 'undefined' || val === 'null') return;
       if (typeof window !== 'undefined' && window.localStorage) window.localStorage.setItem(key, String(val));
     } catch (e) {}
   },
@@ -21,6 +24,41 @@ const storage = {
     } catch (e) {}
   }
 };
+
+function getValidApiId(val) {
+  if (!val || val === 'undefined' || val === 'null') return 21040435;
+  const num = parseInt(val, 10);
+  return (isNaN(num) || num <= 0) ? 21040435 : num;
+}
+
+function getValidApiHash(val) {
+  if (!val || typeof val !== 'string' || val === 'undefined' || val === 'null' || val.trim().length < 5) {
+    return '2d19c05868a10c46c95b6646710f1e73';
+  }
+  return val.trim();
+}
+
+async function safeFetchJson(url, options = {}) {
+  const res = await fetch(url, options);
+  const text = await res.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (parseErr) {
+    if (!res.ok) {
+      throw new Error(`Server returned error (${res.status}): ${text.slice(0, 100) || res.statusText || 'Unable to connect to Telegram'}`);
+    }
+    throw new Error('Invalid response received from server');
+  }
+  if (!res.ok) {
+    let msg = data?.detail || data?.error || data?.message;
+    if (Array.isArray(msg)) {
+      msg = msg.map(m => m.msg || JSON.stringify(m)).join(', ');
+    }
+    throw new Error(msg || `Request failed with status ${res.status}`);
+  }
+  return data;
+}
 
 function getApiBase() {
   const custom = storage.get('API_BASE_URL');
@@ -65,14 +103,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Auto-fill credential fields from browser storage or defaults
   try {
-    const savedApiId = storage.get('TG_API_ID') || '21040435';
-    const savedApiHash = storage.get('TG_API_HASH') || '2d19c05868a10c46c95b6646710f1e73';
+    const savedApiId = getValidApiId(storage.get('TG_API_ID'));
+    const savedApiHash = getValidApiHash(storage.get('TG_API_HASH'));
     const savedPhone = storage.get('TG_PHONE') || '+2347017198661';
     const apiIdEl = document.getElementById('apiIdInput');
     const apiHashEl = document.getElementById('apiHashInput');
     const phoneEl = document.getElementById('phoneInput');
-    if (apiIdEl && !apiIdEl.value) apiIdEl.value = savedApiId;
-    if (apiHashEl && !apiHashEl.value) apiHashEl.value = savedApiHash;
+    if (apiIdEl) apiIdEl.value = savedApiId;
+    if (apiHashEl) apiHashEl.value = savedApiHash;
     if (phoneEl && !phoneEl.value) phoneEl.value = savedPhone;
   } catch (e) {}
 
@@ -335,13 +373,19 @@ async function checkStatus() {
 
 async function handleSendCode(e) {
   e.preventDefault();
-  const apiId = document.getElementById('apiIdInput')?.value;
-  const apiHash = document.getElementById('apiHashInput')?.value;
-  const phone = document.getElementById('phoneInput')?.value;
+  const apiIdVal = getValidApiId(document.getElementById('apiIdInput')?.value || storage.get('TG_API_ID'));
+  const apiHashVal = getValidApiHash(document.getElementById('apiHashInput')?.value || storage.get('TG_API_HASH'));
+  let phone = (document.getElementById('phoneInput')?.value || storage.get('TG_PHONE') || '').trim();
 
-  if (apiId) storage.set('TG_API_ID', apiId);
-  if (apiHash) storage.set('TG_API_HASH', apiHash);
-  if (phone) storage.set('TG_PHONE', phone);
+  if (!phone) {
+    showNotification('Please enter your phone number with country code (e.g. +234...)', 'warning');
+    return;
+  }
+  if (!phone.startsWith('+')) phone = '+' + phone;
+
+  storage.set('TG_API_ID', apiIdVal);
+  storage.set('TG_API_HASH', apiHashVal);
+  storage.set('TG_PHONE', phone);
 
   const btn = document.getElementById('btnRequestCode');
   if (btn) {
@@ -350,17 +394,16 @@ async function handleSendCode(e) {
   }
 
   try {
-    const res = await fetch('/api/auth/send-code', {
+    const data = await safeFetchJson('/api/auth/send-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ api_id: parseInt(apiId), api_hash: apiHash, phone })
+      body: JSON.stringify({ api_id: apiIdVal, api_hash: apiHashVal, phone })
     });
-    const data = await res.json();
-    if (res.ok) {
+    if (data.success) {
       showNotification('Verification code sent to your Telegram app!', 'success');
       openModal('otpModal');
     } else {
-      showNotification(data.detail || data.error || 'Failed to request login code', 'error');
+      showNotification(data.error || 'Failed to request login code', 'error');
     }
   } catch (err) {
     showNotification(err.message, 'error');
@@ -374,9 +417,14 @@ async function handleSendCode(e) {
 
 async function handleVerifyCode(e) {
   e.preventDefault();
-  const code = document.getElementById('otpCodeInput')?.value;
-  const password = document.getElementById('twoFactorPasswordInput')?.value;
+  const code = document.getElementById('otpCodeInput')?.value?.trim();
+  const password = document.getElementById('twoFactorPasswordInput')?.value?.trim();
   const btn = document.getElementById('btnSubmitOtp');
+
+  if (!code) {
+    showNotification('Please enter the verification code sent to Telegram', 'warning');
+    return;
+  }
 
   if (btn) {
     btn.disabled = true;
@@ -384,12 +432,11 @@ async function handleVerifyCode(e) {
   }
 
   try {
-    const res = await fetch('/api/auth/verify-code', {
+    const data = await safeFetchJson('/api/auth/verify-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, password: password || null })
     });
-    const data = await res.json();
 
     if (data.need_2fa) {
       const tfField = document.getElementById('twoFactorField');
@@ -399,12 +446,13 @@ async function handleVerifyCode(e) {
       if (data.session_string) {
         storage.set('TG_SESSION_STRING', data.session_string);
       }
-      const curApiId = document.getElementById('apiIdInput')?.value || storage.get('TG_API_ID');
-      const curApiHash = document.getElementById('apiHashInput')?.value || storage.get('TG_API_HASH');
-      const curPhone = document.getElementById('phoneInput')?.value || storage.get('TG_PHONE');
-      if (curApiId) storage.set('TG_API_ID', curApiId);
-      if (curApiHash) storage.set('TG_API_HASH', curApiHash);
+      const curApiId = getValidApiId(document.getElementById('apiIdInput')?.value || storage.get('TG_API_ID'));
+      const curApiHash = getValidApiHash(document.getElementById('apiHashInput')?.value || storage.get('TG_API_HASH'));
+      const curPhone = (document.getElementById('phoneInput')?.value || storage.get('TG_PHONE') || '').trim();
+      storage.set('TG_API_ID', curApiId);
+      storage.set('TG_API_HASH', curApiHash);
       if (curPhone) storage.set('TG_PHONE', curPhone);
+      if (data.user) storage.set('TG_USER_INFO', JSON.stringify(data.user));
 
       closeModal('otpModal');
       showNotification(`Successfully logged into Telegram! Account saved.`, 'success');
@@ -415,7 +463,7 @@ async function handleVerifyCode(e) {
       toggleAddAccountForm(false);
       switchTab('tab-poster');
     } else {
-      showNotification(data.detail || data.error || 'Verification failed', 'error');
+      showNotification(data.error || 'Verification failed', 'error');
     }
   } catch (err) {
     showNotification(err.message, 'error');
@@ -441,11 +489,11 @@ async function startQrLogin() {
   const apiIdEl = document.getElementById('apiIdInput');
   const apiHashEl = document.getElementById('apiHashInput');
 
-  let apiIdVal = apiIdEl?.value?.trim() || storage.get('TG_API_ID') || '21040435';
-  let apiHashVal = apiHashEl?.value?.trim() || storage.get('TG_API_HASH') || '2d19c05868a10c46c95b6646710f1e73';
+  let parsedApiId = getValidApiId(apiIdEl?.value?.trim() || storage.get('TG_API_ID'));
+  let cleanApiHash = getValidApiHash(apiHashEl?.value?.trim() || storage.get('TG_API_HASH'));
 
-  if (apiIdEl && !apiIdEl.value) apiIdEl.value = apiIdVal;
-  if (apiHashEl && !apiHashEl.value) apiHashEl.value = apiHashVal;
+  if (apiIdEl) apiIdEl.value = parsedApiId;
+  if (apiHashEl) apiHashEl.value = cleanApiHash;
 
   const modal = document.getElementById('qrModal');
   const qrLoading = document.getElementById('qrLoading');
@@ -461,20 +509,21 @@ async function startQrLogin() {
     qrCanvas.classList.add('hidden');
   }
   qrImage?.classList.add('hidden');
+  if (qrDirectLink) qrDirectLink.classList.add('hidden');
   if (qrStatusText) qrStatusText.innerText = 'Connecting to Telegram servers...';
 
   try {
-    const res = await fetch('/api/auth/qr-start', {
+    const data = await safeFetchJson('/api/auth/qr-start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        api_id: parseInt(apiIdVal, 10),
-        api_hash: apiHashVal
+        api_id: parsedApiId,
+        api_hash: cleanApiHash
       })
     });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.detail || data.error || 'Failed to generate QR code');
+
+    if (!data.success || !data.url) {
+      throw new Error(data.error || 'Failed to generate QR code');
     }
 
     let currentQrUrl = data.url;
@@ -532,7 +581,13 @@ async function startQrLogin() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
         });
-        const checkData = await checkRes.json();
+        const checkText = await checkRes.text();
+        let checkData;
+        try {
+          checkData = checkText ? JSON.parse(checkText) : {};
+        } catch (e) {
+          return;
+        }
         
         // If server refreshed the QR token, update the canvas immediately
         if (checkData.url && checkData.url !== currentQrUrl) {
@@ -565,8 +620,8 @@ async function startQrLogin() {
             storage.set('TG_USER_INFO', JSON.stringify(checkData.user));
             if (checkData.user.phone) storage.set('TG_PHONE', checkData.user.phone);
           }
-          if (apiIdVal) storage.set('TG_API_ID', apiIdVal);
-          if (apiHashVal) storage.set('TG_API_HASH', apiHashVal);
+          storage.set('TG_API_ID', parsedApiId);
+          storage.set('TG_API_HASH', cleanApiHash);
 
           // Non-blocking fast refresh of data
           checkStatus();
@@ -578,12 +633,11 @@ async function startQrLogin() {
           clearInterval(qrCheckInterval);
           const pwd = prompt('This Telegram account has Two-Factor Authentication (2FA) password enabled. Please enter your 2FA password:');
           if (pwd) {
-            const pwdRes = await fetch('/api/auth/qr-check', {
+            const pwdData = await safeFetchJson('/api/auth/qr-check', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ password: pwd })
             });
-            const pwdData = await pwdRes.json();
             if (pwdData.success) {
               closeQrModal();
               toggleAddAccountForm(false);
@@ -596,8 +650,8 @@ async function startQrLogin() {
                 storage.set('TG_USER_INFO', JSON.stringify(pwdData.user));
                 if (pwdData.user.phone) storage.set('TG_PHONE', pwdData.user.phone);
               }
-              if (apiIdVal) storage.set('TG_API_ID', apiIdVal);
-              if (apiHashVal) storage.set('TG_API_HASH', apiHashVal);
+              storage.set('TG_API_ID', parsedApiId);
+              storage.set('TG_API_HASH', cleanApiHash);
 
               // Non-blocking fast refresh of data
               checkStatus();
@@ -659,9 +713,7 @@ const ACCOUNTS_STORAGE_KEY = 'PHOBIA_USER_ACCOUNTS_BACKUP';
 
 async function loadAccounts() {
   try {
-    const res = await fetch('/api/accounts');
-    if (!res.ok) return;
-    const data = await res.json();
+    const data = await safeFetchJson('/api/accounts');
     let serverAccounts = data.accounts || [];
 
     // Read local browser backup
@@ -672,15 +724,36 @@ async function loadAccounts() {
       localBackup = [];
     }
 
+    // Fallback: If localBackup is empty, reconstruct from single active session
+    if (serverAccounts.length === 0 && localBackup.length === 0) {
+      const singleSession = storage.get('TG_SESSION_STRING');
+      let singleUser = null;
+      try {
+        singleUser = JSON.parse(storage.get('TG_USER_INFO') || 'null');
+      } catch (e) {}
+      if (singleSession && singleUser) {
+        localBackup = [{
+          phone: singleUser.phone || storage.get('TG_PHONE') || 'account_1',
+          session_string: singleSession,
+          api_id: getValidApiId(storage.get('TG_API_ID')),
+          api_hash: getValidApiHash(storage.get('TG_API_HASH')),
+          user_id: singleUser.id,
+          first_name: singleUser.first_name || '',
+          last_name: singleUser.last_name || '',
+          username: singleUser.username || '',
+          is_active: 1
+        }];
+      }
+    }
+
     // If server has no accounts (e.g. after container redeploy) but browser has backup, restore them!
     if (serverAccounts.length === 0 && localBackup.length > 0) {
       try {
-        const syncRes = await fetch('/api/accounts/sync', {
+        const syncData = await safeFetchJson('/api/accounts/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ accounts: localBackup })
         });
-        const syncData = await syncRes.json();
         if (syncData.success && syncData.accounts) {
           serverAccounts = syncData.accounts;
         }
@@ -690,7 +763,7 @@ async function loadAccounts() {
     }
 
     state.accounts = serverAccounts;
-    state.activeAccount = data.active_account || state.accounts.find(a => a.is_active) || null;
+    state.activeAccount = data.active_account || state.accounts.find(a => a.is_active) || (state.accounts.length > 0 ? state.accounts[0] : null);
 
     // Refresh backup with current accounts
     if (state.accounts.length > 0) {
@@ -867,13 +940,13 @@ async function switchTelegramAccount(accountId) {
   showNotification('Switching working Telegram account...', 'info');
 
   try {
-    const res = await fetch(`/api/accounts/${accountId}/activate`, {
+    const data = await safeFetchJson(`/api/accounts/${accountId}/activate`, {
       method: 'POST'
     });
-    const data = await res.json();
-    if (res.ok && data.success) {
-      const active = data.active_account || {};
-      const name = active.first_name || 'Account';
+    if (data.success) {
+      const targetAcc = state.accounts?.find(a => a.id === accountId) || {};
+      const active = data.active_account || data.user || targetAcc;
+      const name = active.first_name || targetAcc.first_name || 'Account';
       showNotification(`Switched working account to ${name}!`, 'success');
 
       // Update local storage so session persists on this new account
@@ -881,18 +954,21 @@ async function switchTelegramAccount(accountId) {
       if (active.phone) storage.set('TG_PHONE', active.phone);
       if (active.api_id) storage.set('TG_API_ID', active.api_id);
       if (active.api_hash) storage.set('TG_API_HASH', active.api_hash);
-      storage.set('TG_USER_INFO', JSON.stringify({
-        id: active.user_id,
-        first_name: active.first_name,
-        last_name: active.last_name,
-        username: active.username,
-        phone: active.phone
-      }));
+      if (active.first_name) {
+        storage.set('TG_USER_INFO', JSON.stringify({
+          id: active.user_id || active.id || 0,
+          first_name: active.first_name || '',
+          last_name: active.last_name || '',
+          username: active.username || '',
+          phone: active.phone || ''
+        }));
+      }
 
       // Immediate refresh of accounts and header UI in 0ms
       state.activeAccount = active;
       if (state.accounts) {
         state.accounts.forEach(a => { a.is_active = (a.id === accountId ? 1 : 0); });
+        storage.set(ACCOUNTS_STORAGE_KEY, JSON.stringify(state.accounts));
       }
       renderAccounts();
       checkStatus();
