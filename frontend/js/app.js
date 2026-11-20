@@ -449,45 +449,48 @@ async function startQrLogin() {
       throw new Error(data.detail || data.error || 'Failed to generate QR code');
     }
 
-    const qrUrl = data.url;
+    let currentQrUrl = data.url;
 
-    // 1. Render in-browser with qrcodejs
-    let rendered = false;
-    if (qrCanvas && typeof QRCode !== 'undefined') {
-      try {
-        new QRCode(qrCanvas, {
-          text: qrUrl,
-          width: 192,
-          height: 192,
-          colorDark: "#000000",
-          colorLight: "#ffffff",
-          correctLevel: QRCode.CorrectLevel.M
-        });
-        qrLoading?.classList.add('hidden');
-        qrCanvas.classList.remove('hidden');
-        rendered = true;
-      } catch (err) {
-        console.warn('QRCode JS error, falling back to image:', err);
+    function renderQr(url) {
+      currentQrUrl = url;
+      let rendered = false;
+      if (qrCanvas && typeof QRCode !== 'undefined') {
+        try {
+          qrCanvas.innerHTML = '';
+          new QRCode(qrCanvas, {
+            text: url,
+            width: 192,
+            height: 192,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.M
+          });
+          qrLoading?.classList.add('hidden');
+          qrCanvas.classList.remove('hidden');
+          rendered = true;
+        } catch (err) {
+          console.warn('QRCode JS error, falling back to image:', err);
+        }
+      }
+
+      if (qrImage) {
+        const qrImgSrc = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(url)}`;
+        qrImage.src = qrImgSrc;
+        qrImage.onload = () => {
+          if (!rendered) {
+            qrLoading?.classList.add('hidden');
+            qrImage?.classList.remove('hidden');
+          }
+        };
+      }
+
+      if (qrDirectLink) {
+        qrDirectLink.href = url;
+        qrDirectLink.classList.remove('hidden');
       }
     }
 
-    // 2. Also prepare fallback image
-    if (qrImage) {
-      const qrImgSrc = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrUrl)}`;
-      qrImage.src = qrImgSrc;
-      qrImage.onload = () => {
-        if (!rendered) {
-          qrLoading?.classList.add('hidden');
-          qrImage?.classList.remove('hidden');
-        }
-      };
-    }
-
-    // 3. Direct mobile deep link
-    if (qrDirectLink) {
-      qrDirectLink.href = qrUrl;
-      qrDirectLink.classList.remove('hidden');
-    }
+    renderQr(data.url);
 
     if (qrStatusText) {
       qrStatusText.innerHTML = '<i class="fa-solid fa-radar mr-1"></i> Waiting for scan... (Auto-confirms immediately)';
@@ -502,6 +505,15 @@ async function startQrLogin() {
           body: JSON.stringify({})
         });
         const checkData = await checkRes.json();
+        
+        // If server refreshed the QR token, update the canvas immediately
+        if (checkData.url && checkData.url !== currentQrUrl) {
+          renderQr(checkData.url);
+          if (qrStatusText) {
+            qrStatusText.innerHTML = '<i class="fa-solid fa-arrows-rotate mr-1 text-cyan-400"></i> Code refreshed automatically! Ready to scan.';
+          }
+        }
+
         if (checkData.success) {
           clearInterval(qrCheckInterval);
           closeQrModal();
