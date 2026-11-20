@@ -309,34 +309,10 @@ def init_db():
 
     conn.commit()
 
-    # Pre-populate or restore templates from persistent file storage
-    cursor.execute("SELECT COUNT(*) as count FROM templates")
-    if cursor.fetchone()["count"] == 0:
-        restored = _restore_templates_internal(cursor)
-        if restored == 0:
-            starter_templates = [
-                (
-                    "IPTV Premium Offer #1",
-                    "{Hello|Hey|Hi} everyone! 👋\n\nLooking for a {rock-solid|ultra-fast|top-tier} IPTV service?\n🔥 18,000+ Channels & 80,000+ VOD (4K/FHD)\n⚡ Anti-Freeze Tech | No Buffering\n📺 Compatible with Firestick, Smart TV, Android, MAG, Apple TV\n\n👉 Free 24h Trial Available! DM @{username} now to get set up instantly! 🚀",
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat()
-                ),
-                (
-                    "Reseller & Rebrand Panel Special",
-                    "{Attention Resellers|Reseller Opportunity|Boost your IPTV business} 💼\n\nLooking to start or scale your own IPTV brand?\n✅ Super Reseller & Master Panels available\n✅ Custom App Rebranding (IBO Player, Smarters Pro, XCIPTV)\n✅ Best credit prices in the market with instant activation\n✅ 24/7 dedicated support & 99.9% uptime server\n\n📩 Message @{username} for panel test and price list!",
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat()
-                ),
-                (
-                    "Fast Trial & Support",
-                    "{Tired of freezing streams during live sports?|Looking for the best football and sports streams?} ⚽🥊\n\nTest our ultra-fast server before you buy!\n✅ All Sports & PPV in FHD/4K (60 FPS)\n✅ Full EPG guide included\n✅ 1, 3, 6 & 12 Month plans\n\nDrop a DM to @{username} for your free test link today! 🎯",
-                    datetime.now().isoformat(),
-                    datetime.now().isoformat()
-                )
-            ]
-            cursor.executemany("INSERT INTO templates (name, content, created_at, updated_at) VALUES (?, ?, ?, ?)", starter_templates)
-            conn.commit()
-            _export_templates_internal(cursor)
+    # Always restore and sync templates from persistent file storage
+    _restore_templates_internal(cursor)
+    conn.commit()
+    _export_templates_internal(cursor)
 
     # Restore campaigns from file if empty
     cursor.execute("SELECT COUNT(*) as count FROM campaigns")

@@ -522,6 +522,7 @@ async function startQrLogin() {
           await loadAccounts();
           await loadGroups(true);
           await loadStats();
+          await loadTemplates();
           toggleAddAccountForm(false);
           switchTab('tab-poster');
         } else if (checkData.need_2fa) {
@@ -541,6 +542,7 @@ async function startQrLogin() {
               await loadAccounts();
               await loadGroups(true);
               await loadStats();
+              await loadTemplates();
               toggleAddAccountForm(false);
               switchTab('tab-poster');
             } else {
@@ -942,8 +944,13 @@ function renderTemplatePickers() {
   // Quick Broadcast template select dropdown
   const quickTplSelect = document.getElementById('quickTemplateSelect');
   if (quickTplSelect) {
+    const curVal = quickTplSelect.value || 'all';
     quickTplSelect.innerHTML = '<option value="all">🔄 Rotate Across All Saved Templates (Spintax)</option>' +
       state.templates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+    if (curVal && quickTplSelect.querySelector(`option[value="${curVal}"]`)) {
+      quickTplSelect.value = curVal;
+    }
+    handleQuickTemplateChange();
   }
 
   // Test Post select dropdown
@@ -963,6 +970,24 @@ function renderTemplatePickers() {
         <span class="text-xs text-slate-200 font-medium">${escapeHtml(t.name)}</span>
       </label>
     `).join('');
+  }
+}
+
+function handleQuickTemplateChange() {
+  const sel = document.getElementById('quickTemplateSelect');
+  const box = document.getElementById('quickTemplatePreviewBox');
+  if (!sel || !box) return;
+  const val = sel.value;
+  if (val === 'all') {
+    box.classList.add('hidden');
+    return;
+  }
+  const t = state.templates.find(item => String(item.id) === String(val));
+  if (t) {
+    box.innerText = t.content;
+    box.classList.remove('hidden');
+  } else {
+    box.classList.add('hidden');
   }
 }
 

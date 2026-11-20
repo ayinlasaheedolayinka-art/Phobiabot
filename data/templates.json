@@ -1,5 +1,54 @@
 [
   {
+    "id": 11,
+    "name": "Multi-Room & Family Device Bundle 🏠📱",
+    "content": "{Streaming for the whole household!|One subscription for all your devices!} 🏠📺\n\nOur Multi-Connection Package allows:\n✅ Simultaneous streaming across multiple screens\n✅ Smart TV, Android Box, Fire TV Stick, iPhone, iPad, PC\n✅ Kids channels, sports, news, documentaries & movies\n\nContact @{username} for special family bundle discounts! 🎁",
+    "created_at": "2026-11-20T00:00:00.000000",
+    "updated_at": "2026-11-20T00:00:00.000000"
+  },
+  {
+    "id": 10,
+    "name": "Matchday Weekend Special Pass ⚽🔥",
+    "content": "{Matchday is here!|Don't miss the biggest fixtures this weekend!} ⚽🔥\n\nGet your Weekend Sports Pass:\n🏆 All Saturday & Sunday games live in 4K\n🥊 Main Card UFC & Boxing Saturday Night PPV\n📺 Setup in under 2 minutes on your TV or phone\n\nDrop a quick DM to @{username} to get connected before kickoff! ⏱️⚽",
+    "created_at": "2026-11-20T00:00:00.000000",
+    "updated_at": "2026-11-20T00:00:00.000000"
+  },
+  {
+    "id": 9,
+    "name": "Cinema Movies & Full Series VOD Hub 🍿🎬",
+    "content": "{Stop paying for 5 different streaming subscriptions!|All movies and series in one place!} 🍿🎬\n\nAccess our massive 100,000+ VOD Cinema Library:\n🎬 Latest 2026 Box Office releases in 4K HDR\n📺 Complete seasons from Netflix, HBO, Disney+, Amazon Prime, Apple TV+\n🌍 Multi-subtitles and multi-audio tracks included\n\nDM @{username} for instant access and free trial! 🎟️",
+    "created_at": "2026-11-20T00:00:00.000000",
+    "updated_at": "2026-11-20T00:00:00.000000"
+  },
+  {
+    "id": 8,
+    "name": "Anti-Freeze & High Uptime Dedicated Server 🛡️",
+    "content": "{Fed up with lagging streams and buffering?|Upgrade to high-performance streaming!} 🛡️⚡\n\nOur private dedicated servers ensure:\n🔥 99.9% Guaranteed Server Uptime\n🔥 10Gbps dedicated high-bandwidth backbone\n🔥 Anti-DDoS and anti-freeze stream caching\n🔥 EPG TV guide updated daily\n\nAsk for a free live test from @{username} right now! 🚀",
+    "created_at": "2026-11-20T00:00:00.000000",
+    "updated_at": "2026-11-20T00:00:00.000000"
+  },
+  {
+    "id": 7,
+    "name": "Reseller & Master Panel Opportunity 💼",
+    "content": "{Attention Resellers|Start your own IPTV business today|Boost your IPTV profits!} 💼💰\n\nJoin our top-tier Reseller Network:\n✅ Super Reseller & Master Panels available\n✅ Custom App Rebranding (IBO Player, Smarters Pro, XCIPTV)\n✅ Best wholesale credit prices in the market with instant activation\n✅ 99.9% Server Uptime & 24/7 dedicated Telegram support\n\n📩 DM @{username} for panel test link and discounted reseller price list!",
+    "created_at": "2026-11-20T00:00:00.000000",
+    "updated_at": "2026-11-20T00:00:00.000000"
+  },
+  {
+    "id": 6,
+    "name": "Free 24h Test Drive (Instant Access) ⚡",
+    "content": "{Want to test before you buy?|Try our premium IPTV risk-free!} 📺✨\n\nGet a 100% FREE 24-Hour Trial:\n✅ Full access to all 20,000+ channels & sports PPV\n✅ Catch-up & 7-day TV replay guide\n✅ Compatible with IPTV Smarters, TiviMate, IBO Player, XCIPTV\n\nSend a direct message to @{username} — trial link generated in 30 seconds! ⏱️",
+    "created_at": "2026-11-20T00:00:00.000000",
+    "updated_at": "2026-11-20T00:00:00.000000"
+  },
+  {
+    "id": 5,
+    "name": "Live Football & Sports Special ⚽🥊",
+    "content": "{Tired of freezing streams during big matches?|Never miss another live goal!} ⚽🥊\n\nWatch all live sports in crystal clear 4K / 60FPS:\n🏆 UEFA Champions League, Premier League, La Liga, Serie A\n🥊 UFC PPV, Boxing, WWE, Formula 1, NBA & NFL\n⚡ Ultra-low latency raw streams with multi-language commentary\n\nMessage @{username} right now for your instant free test link! 🎯",
+    "created_at": "2026-11-20T00:00:00.000000",
+    "updated_at": "2026-11-20T00:00:00.000000"
+  },
+  {
     "id": 3,
     "name": "Fast Trial & Support",
     "content": "{Tired of freezing streams during live sports?|Looking for the best football and sports streams?} ⚽🥊\n\nTest our ultra-fast server before you buy!\n✅ All Sports & PPV in FHD/4K (60 FPS)\n✅ Full EPG guide included\n✅ 1, 3, 6 & 12 Month plans\n\nDrop a DM to @{username} for your free test link today! 🎯",
@@ -16,8 +65,8 @@
   {
     "id": 1,
     "name": "IPTV Premium Offer #1",
-    "content": "{Hello|Hey|Hi} everyone! 👋\n\nLooking for a {rock-solid|ultra-fast|top-tier} IPTV service?\n🔥 18,000+ Channels & 80,000+ VOD (4K/FHD)\n⚡ Anti-Freeze Tech | No Buffering\n📺 Compatible with Firestick, Smart TV, Android, MAG, Apple TV\n\n👉 Free 24h Trial Available! DM @{username} now to get set up instantly! 🚀",
+    "content": "{Hello|Hey|Hi} everyone! 👋\n\nLooking for a {rock-solid|ultra-fast|top-tier} IPTV service?\n🔥 18,000+ Live Channels & 80,000+ Movies/Series (4K/FHD)\n⚡ Anti-Freeze Technology | Zero Buffering\n📺 Works smoothly on Firestick, Smart TV, Android, MAG, iOS, PC\n\n👉 Free 24h Trial Available! DM @{username} now to get set up instantly! 🚀",
     "created_at": "2026-11-03T01:24:51.427537",
-    "updated_at": "2026-11-03T01:24:51.427537"
+    "updated_at": "2026-11-20T01:09:54.902655"
   }
 ]

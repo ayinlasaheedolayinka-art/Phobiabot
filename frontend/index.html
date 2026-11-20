@@ -398,10 +398,16 @@
 
             <!-- Template Selector -->
             <div>
-              <label class="text-[11px] text-slate-400 block mb-1">Marketing Content:</label>
-              <select id="quickTemplateSelect" class="w-full bg-slate-950 border border-darkBorder rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-[11px] text-slate-400">Marketing Content:</label>
+                <button type="button" onclick="switchTab('tab-templates')" class="text-[10px] text-brand-400 hover:underline font-semibold flex items-center gap-1">
+                  <i class="fa-solid fa-pen-to-square"></i> Manage Templates
+                </button>
+              </div>
+              <select id="quickTemplateSelect" onchange="handleQuickTemplateChange()" class="w-full bg-slate-950 border border-darkBorder rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
                 <option value="all">🔄 Rotate Across All Saved Templates (Spintax)</option>
               </select>
+              <div id="quickTemplatePreviewBox" class="hidden mt-2 p-2.5 bg-slate-950/80 border border-darkBorder/60 rounded-xl text-[11px] text-slate-300 font-mono whitespace-pre-wrap max-h-24 overflow-y-auto"></div>
             </div>
 
             <!-- Anti-Ban Safe Delay -->
