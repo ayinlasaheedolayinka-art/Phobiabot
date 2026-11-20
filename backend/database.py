@@ -798,18 +798,41 @@ def save_or_update_account(phone: str, api_id: int, api_hash: str, session_strin
     conn.close()
     return acc_id
 
-def set_active_account(account_id: int) -> Optional[Dict[str, Any]]:
+def set_active_account(identifier: Any) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM telegram_accounts WHERE id = ?", (account_id,))
-    row = cursor.fetchone()
+    row = None
+
+    # 1. Try by numeric ID
+    try:
+        val_int = int(identifier)
+        cursor.execute("SELECT * FROM telegram_accounts WHERE id = ?", (val_int,))
+        row = cursor.fetchone()
+    except (ValueError, TypeError):
+        row = None
+
+    # 2. Try by phone number
+    if not row:
+        clean_phone = str(identifier).strip().replace(" ", "").replace("-", "")
+        with_plus = clean_phone if clean_phone.startswith("+") else "+" + clean_phone
+        without_plus = clean_phone.lstrip("+")
+        cursor.execute("SELECT * FROM telegram_accounts WHERE phone = ? OR phone = ? OR phone = ?", (clean_phone, with_plus, without_plus))
+        row = cursor.fetchone()
+
+    # 3. Try by username
+    if not row:
+        clean_uname = str(identifier).strip().lstrip("@")
+        cursor.execute("SELECT * FROM telegram_accounts WHERE username = ?", (clean_uname,))
+        row = cursor.fetchone()
+
     if not row:
         conn.close()
         return None
 
     acc = dict(row)
+    acc_id = acc["id"]
     cursor.execute("UPDATE telegram_accounts SET is_active = 0")
-    cursor.execute("UPDATE telegram_accounts SET is_active = 1 WHERE id = ?", (account_id,))
+    cursor.execute("UPDATE telegram_accounts SET is_active = 1 WHERE id = ?", (acc_id,))
     
     # Sync to settings
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_id', ?)", (str(acc["api_id"]),))
@@ -828,6 +851,15 @@ def set_active_account(account_id: int) -> Optional[Dict[str, Any]]:
     conn.commit()
     _export_accounts_internal(cursor)
     conn.close()
+
+    # Also persist to session string file for complete fail-safe across restarts
+    try:
+        s_file = os.path.join(DATA_DIR, "session_string.txt")
+        with open(s_file, "w") as f:
+            f.write(acc["session_string"])
+    except Exception:
+        pass
+
     return acc
 
 def delete_account(account_id: int) -> bool:

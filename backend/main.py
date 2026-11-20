@@ -238,8 +238,57 @@ def sync_accounts(req: AccountSyncRequest):
     updated = sync_accounts_bulk(items)
     return {"success": True, "accounts": updated}
 
+class AccountActivateRequest(BaseModel):
+    id: Optional[Any] = None
+    phone: Optional[str] = None
+    session_string: Optional[str] = None
+    api_id: Optional[int] = None
+    api_hash: Optional[str] = None
+    user_id: Optional[int] = None
+    first_name: Optional[str] = ""
+    last_name: Optional[str] = ""
+    username: Optional[str] = ""
+
+@app.post("/api/accounts/activate")
+async def activate_account_body(req: AccountActivateRequest):
+    try:
+        tg = TelegramManager.get_instance()
+        target = req.id or req.phone
+        if not target and req.session_string:
+            target = req.phone or "account"
+        
+        # If account details passed from browser backup, ensure it is saved
+        if req.session_string and req.phone:
+            save_or_update_account(
+                phone=req.phone,
+                api_id=req.api_id or 21040435,
+                api_hash=req.api_hash or "2d19c05868a10c46c95b6646710f1e73",
+                session_string=req.session_string,
+                user={
+                    "id": req.user_id or 0,
+                    "first_name": req.first_name or "",
+                    "last_name": req.last_name or "",
+                    "username": req.username or "",
+                    "phone": req.phone or ""
+                },
+                make_active=True
+            )
+            target = req.phone
+
+        res = await tg.switch_account(target)
+        if not res.get("success"):
+            return JSONResponse(status_code=400, content={"success": False, "error": res.get("error", "Failed to switch account")})
+        active = get_active_account()
+        return JSONResponse(status_code=200, content={
+            "success": True,
+            "active_account": active,
+            "user": res.get("user")
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"success": False, "error": f"Failed to switch account: {str(e)}"})
+
 @app.post("/api/accounts/{account_id}/activate")
-async def activate_account(account_id: int):
+async def activate_account(account_id: str):
     try:
         tg = TelegramManager.get_instance()
         res = await tg.switch_account(account_id)
@@ -530,5 +579,12 @@ if os.path.exists(FRONTEND_DIR):
 def serve_index():
     index_file = os.path.join(FRONTEND_DIR, "index.html")
     if os.path.exists(index_file):
-        return FileResponse(index_file)
+        return FileResponse(
+            index_file,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
     return {"message": "Telegram Scout Bot Backend running. Frontend index.html not found yet."}

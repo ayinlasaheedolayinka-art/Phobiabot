@@ -29,6 +29,7 @@ class TelegramManager:
 
     def __init__(self):
         self.client: Optional[TelegramClient] = None
+        self._auth_client: Optional[TelegramClient] = None
         self.phone_code_hash: Optional[str] = None
         self.temp_phone: Optional[str] = None
         self.is_scanning: bool = False
@@ -349,21 +350,17 @@ class TelegramManager:
             phone = phone.strip().replace(" ", "").replace("-", "")
             if not phone.startswith("+"):
                 phone = "+" + phone
-            set_setting("api_id", api_id_val)
-            set_setting("api_hash", api_hash_val)
-            set_setting("phone", phone)
 
-            if self.client and self.client.is_connected():
+            if self._auth_client and self._auth_client.is_connected():
                 try:
-                    await asyncio.wait_for(self.client.disconnect(), timeout=3.0)
+                    await asyncio.wait_for(self._auth_client.disconnect(), timeout=2.0)
                 except Exception:
                     pass
 
-            # Initialize fresh StringSession
-            self.client = TelegramClient(StringSession(""), api_id_val, api_hash_val, auto_reconnect=True)
-            await asyncio.wait_for(self.client.connect(), timeout=12.0)
+            self._auth_client = TelegramClient(StringSession(""), api_id_val, api_hash_val, auto_reconnect=True)
+            await asyncio.wait_for(self._auth_client.connect(), timeout=12.0)
 
-            res = await self.client.send_code_request(phone)
+            res = await self._auth_client.send_code_request(phone)
             self.phone_code_hash = res.phone_code_hash
             self.temp_phone = phone
             self.temp_api_id = api_id_val
@@ -375,22 +372,31 @@ class TelegramManager:
             return {"success": False, "error": str(e)}
 
     async def sign_in_with_code(self, code: str, password: Optional[str] = None) -> Dict[str, Any]:
-        if not self.client or not self.temp_phone or not self.phone_code_hash:
+        if not self._auth_client or not self.temp_phone or not self.phone_code_hash:
             return {"success": False, "error": "No active sign-in request found. Request a new code first."}
 
         code = code.strip().replace(" ", "")
         try:
             try:
-                await self.client.sign_in(self.temp_phone, code=code, phone_code_hash=self.phone_code_hash)
+                await self._auth_client.sign_in(self.temp_phone, code=code, phone_code_hash=self.phone_code_hash)
             except errors.SessionPasswordNeededError:
                 if not password:
                     return {"success": False, "need_2fa": True, "message": "Two-factor authentication (2FA) password required"}
-                await self.client.sign_in(password=password)
+                await self._auth_client.sign_in(password=password)
 
-            me = await self.client.get_me()
-            saved_str = self.client.session.save()
+            me = await self._auth_client.get_me()
+            saved_str = self._auth_client.session.save()
             if isinstance(saved_str, str) and saved_str:
                 self._save_session_string(saved_str)
+
+            # Switch active client
+            if self.client and self.client.is_connected():
+                try:
+                    await self.client.disconnect()
+                except Exception:
+                    pass
+            self.client = self._auth_client
+            self._auth_client = None
 
             self._cached_user = {
                 "id": me.id,
@@ -405,8 +411,8 @@ class TelegramManager:
             self._start_keep_alive()
 
             # Save to multi-account registry
-            api_id_val = int(getattr(self, "temp_api_id", 0) or get_setting("api_id") or 0)
-            api_hash_val = getattr(self, "temp_api_hash", "") or get_setting("api_hash") or ""
+            api_id_val = int(getattr(self, "temp_api_id", 0) or get_setting("api_id") or 21040435)
+            api_hash_val = getattr(self, "temp_api_hash", "") or get_setting("api_hash") or "2d19c05868a10c46c95b6646710f1e73"
             save_or_update_account(
                 phone=self._cached_user.get("phone") or self.temp_phone,
                 api_id=api_id_val,
@@ -433,8 +439,12 @@ class TelegramManager:
         api_id_val = int(api_id) if (api_id and int(api_id) > 0) else DEFAULT_API_ID
         api_hash_val = str(api_hash).strip() if (api_hash and str(api_hash).strip()) else DEFAULT_API_HASH
 
-        attempts = [(api_id_val, api_hash_val)]
-        if api_id_val != DEFAULT_API_ID or api_hash_val != DEFAULT_API_HASH:
+        # Always start with the verified Telegram pair if custom is mismatched or default
+        attempts = []
+        if (api_id_val, api_hash_val) != (DEFAULT_API_ID, DEFAULT_API_HASH):
+            attempts.append((DEFAULT_API_ID, DEFAULT_API_HASH))
+            attempts.append((api_id_val, api_hash_val))
+        else:
             attempts.append((DEFAULT_API_ID, DEFAULT_API_HASH))
 
         last_error = None
@@ -447,17 +457,17 @@ class TelegramManager:
                     except Exception:
                         pass
                 
-                if self.client and self.client.is_connected():
+                if self._auth_client and self._auth_client.is_connected():
                     try:
-                        await asyncio.wait_for(self.client.disconnect(), timeout=3.0)
+                        await asyncio.wait_for(self._auth_client.disconnect(), timeout=2.0)
                     except Exception:
                         pass
 
                 self.temp_api_id = attempt_id
                 self.temp_api_hash = attempt_hash
-                self.client = TelegramClient(StringSession(""), attempt_id, attempt_hash, auto_reconnect=True)
-                await asyncio.wait_for(self.client.connect(), timeout=12.0)
-                self.qr_instance = await self.client.qr_login()
+                self._auth_client = TelegramClient(StringSession(""), attempt_id, attempt_hash, auto_reconnect=True)
+                await asyncio.wait_for(self._auth_client.connect(), timeout=12.0)
+                self.qr_instance = await self._auth_client.qr_login()
                 self.qr_url = self.qr_instance.url
                 self.qr_done = False
                 self.qr_need_2fa = False
@@ -483,16 +493,26 @@ class TelegramManager:
         return {"success": False, "error": f"Failed to connect to Telegram: {str(last_error)}"}
 
     async def _qr_worker(self):
-        while not self.qr_done and getattr(self, "qr_instance", None):
+        while not self.qr_done and getattr(self, "qr_instance", None) and self._auth_client:
             try:
-                # Proactively wait with a 20s timeout so token is refreshed before it can expire
-                user = await self.qr_instance.wait(timeout=20.0)
+                # Wait for the full lifetime of the token (Telethon handles duration automatically)
+                user = await self.qr_instance.wait()
                 self.qr_user = user
                 self.qr_done = True
                 
-                saved_str = self.client.session.save()
-                me = await self.client.get_me()
+                saved_str = self._auth_client.session.save()
+                me = await self._auth_client.get_me()
                 user_phone = me.phone or getattr(user, 'phone', None) or ""
+
+                # Disconnect old main client and replace with the authorized client
+                if self.client and self.client.is_connected():
+                    try:
+                        await self.client.disconnect()
+                    except Exception:
+                        pass
+                self.client = self._auth_client
+                self._auth_client = None
+
                 self._cached_user = {
                     "id": me.id,
                     "first_name": me.first_name or "",
@@ -523,7 +543,7 @@ class TelegramManager:
                 log_activity("WARN", "AUTH", "Telegram QR login requires 2FA password")
                 break
             except (errors.AuthTokenExpiredError, asyncio.TimeoutError):
-                # Token expired or DC migrated: renew immediately and keep waiting seamlessly
+                # Token expired naturally: renew immediately and keep waiting seamlessly
                 try:
                     await self.qr_instance.recreate()
                     self.qr_url = self.qr_instance.url
@@ -537,7 +557,7 @@ class TelegramManager:
                 break
             except Exception as e:
                 err_msg = str(e).lower()
-                # Catch any token expiration error including DC migration re-scan requests
+                # Catch token expiration or DC migration re-scan requests
                 if "expired" in err_msg or "token" in err_msg or "rescan" in err_msg or "re-scanned" in err_msg:
                     try:
                         await self.qr_instance.recreate()
@@ -562,9 +582,21 @@ class TelegramManager:
             if not password:
                 return {"success": False, "need_2fa": True, "message": "Two-factor authentication (2FA) password required"}
             try:
-                user = await self.client.sign_in(password=password)
-                saved_str = self.client.session.save()
-                me = await self.client.get_me()
+                auth_cl = self._auth_client or self.client
+                if not auth_cl:
+                    return {"success": False, "error": "Auth client missing for 2FA"}
+                user = await auth_cl.sign_in(password=password)
+                saved_str = auth_cl.session.save()
+                me = await auth_cl.get_me()
+
+                if self.client and self.client != auth_cl and self.client.is_connected():
+                    try:
+                        await self.client.disconnect()
+                    except Exception:
+                        pass
+                self.client = auth_cl
+                self._auth_client = None
+
                 user_phone = me.phone or getattr(user, 'phone', None) or ""
                 self._cached_user = {
                     "id": me.id,
@@ -608,26 +640,37 @@ class TelegramManager:
             "url": getattr(self, "qr_url", None)
         }
 
-    async def switch_account(self, account_id: int) -> Dict[str, Any]:
-        acc = set_active_account(account_id)
+    async def switch_account(self, identifier: Any) -> Dict[str, Any]:
+        acc = set_active_account(identifier)
         if not acc:
             return {"success": False, "error": "Account not found"}
 
-        # Disconnect old client cleanly
-        if self.client:
-            try:
-                if self.client.is_connected():
-                    await self.client.disconnect()
-            except Exception:
-                pass
+        # Disconnect old client cleanly in background
+        old_client = self.client
         self.client = None
-        self._cached_user = None
+        self._cached_user = {
+            "id": acc.get("user_id", 0),
+            "first_name": acc.get("first_name", ""),
+            "last_name": acc.get("last_name", ""),
+            "username": acc.get("username", ""),
+            "phone": acc.get("phone", "")
+        }
         self._cached_groups = []
         self._cached_groups_time = 0
 
-        # Reconnect with new active account
-        client = await self.get_client()
-        self._start_keep_alive()
+        # Connect in background so API responds in 5ms
+        async def _connect_switched():
+            if old_client:
+                try:
+                    if old_client.is_connected():
+                        await old_client.disconnect()
+                except Exception:
+                    pass
+            await self.get_client()
+            self._start_keep_alive()
+            await self.get_dialogs_and_groups(force_refresh=True)
+
+        asyncio.create_task(_connect_switched())
 
         user_display = acc.get("first_name", "")
         if acc.get("username"):
@@ -636,13 +679,10 @@ class TelegramManager:
 
         log_activity("SUCCESS", "AUTH", f"Switched working Telegram account to {user_display} {phone_display}")
 
-        # Refresh groups in background task without blocking the HTTP response
-        asyncio.create_task(self.get_dialogs_and_groups(force_refresh=True))
-
         return {
             "success": True,
             "active_account": acc,
-            "groups_count": len(self._cached_groups)
+            "user": self._cached_user
         }
 
     async def logout(self) -> Dict[str, Any]:

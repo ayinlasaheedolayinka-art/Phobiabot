@@ -513,7 +513,7 @@ async function startQrLogin() {
   if (qrStatusText) qrStatusText.innerText = 'Connecting to Telegram servers...';
 
   try {
-    const data = await safeFetchJson('/api/auth/qr-start', {
+    const data = await safeFetchJson(`/api/auth/qr-start?_t=${Date.now()}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -576,7 +576,7 @@ async function startQrLogin() {
     if (qrCheckInterval) clearInterval(qrCheckInterval);
     qrCheckInterval = setInterval(async () => {
       try {
-        const checkRes = await fetch('/api/auth/qr-check', {
+        const checkRes = await fetch(`/api/auth/qr-check?_t=${Date.now()}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
@@ -599,7 +599,7 @@ async function startQrLogin() {
 
         if (checkData.error) {
           const errLower = (checkData.error || '').toLowerCase();
-          if (!errLower.includes('expired') && !errLower.includes('token') && !errLower.includes('active') && !errLower.includes('waiting')) {
+          if (!errLower.includes('expired') && !errLower.includes('token') && !errLower.includes('active') && !errLower.includes('waiting') && !errLower.includes('rescan')) {
             clearInterval(qrCheckInterval);
             closeQrModal();
             showNotification(checkData.error, 'error');
@@ -930,59 +930,67 @@ function renderAccounts() {
   }
 }
 
-async function switchTelegramAccount(accountId) {
-  // Give instant feedback on the clicked button
-  const btns = document.querySelectorAll(`button[onclick*="switchTelegramAccount(${accountId})"]`);
-  btns.forEach(b => {
-    b.disabled = true;
-    b.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Switching...';
-  });
-  showNotification('Switching working Telegram account...', 'info');
+async function switchTelegramAccount(accountIdentifier) {
+  // 1. Optimistic Instant UI Update (0ms latency!)
+  let targetAcc = (state.accounts || []).find(a => String(a.id) === String(accountIdentifier) || a.phone === String(accountIdentifier));
+  if (!targetAcc) {
+    targetAcc = { id: accountIdentifier };
+  }
 
-  try {
-    const data = await safeFetchJson(`/api/accounts/${accountId}/activate`, {
-      method: 'POST'
+  // Instantly mark active in memory & DOM
+  if (state.accounts && state.accounts.length > 0) {
+    state.accounts.forEach(a => {
+      a.is_active = (String(a.id) === String(accountIdentifier) || a.phone === String(accountIdentifier) || (targetAcc.phone && a.phone === targetAcc.phone)) ? 1 : 0;
     });
-    if (data.success) {
-      const targetAcc = state.accounts?.find(a => a.id === accountId) || {};
-      const active = data.active_account || data.user || targetAcc;
-      const name = active.first_name || targetAcc.first_name || 'Account';
-      showNotification(`Switched working account to ${name}!`, 'success');
+    storage.set(ACCOUNTS_STORAGE_KEY, JSON.stringify(state.accounts));
+  }
+  state.activeAccount = targetAcc;
+  renderAccounts();
 
-      // Update local storage so session persists on this new account
-      if (active.session_string) storage.set('TG_SESSION_STRING', active.session_string);
-      if (active.phone) storage.set('TG_PHONE', active.phone);
-      if (active.api_id) storage.set('TG_API_ID', active.api_id);
-      if (active.api_hash) storage.set('TG_API_HASH', active.api_hash);
-      if (active.first_name) {
-        storage.set('TG_USER_INFO', JSON.stringify({
-          id: active.user_id || active.id || 0,
-          first_name: active.first_name || '',
-          last_name: active.last_name || '',
-          username: active.username || '',
-          phone: active.phone || ''
-        }));
-      }
+  const name = targetAcc.first_name || 'Account';
+  showNotification(`Switched working account to ${name}!`, 'success');
 
-      // Immediate refresh of accounts and header UI in 0ms
-      state.activeAccount = active;
-      if (state.accounts) {
-        state.accounts.forEach(a => { a.is_active = (a.id === accountId ? 1 : 0); });
-        storage.set(ACCOUNTS_STORAGE_KEY, JSON.stringify(state.accounts));
-      }
+  // 2. Persist active credentials in local browser storage
+  if (targetAcc.session_string) storage.set('TG_SESSION_STRING', targetAcc.session_string);
+  if (targetAcc.phone) storage.set('TG_PHONE', targetAcc.phone);
+  if (targetAcc.api_id) storage.set('TG_API_ID', targetAcc.api_id);
+  if (targetAcc.api_hash) storage.set('TG_API_HASH', targetAcc.api_hash);
+  if (targetAcc.first_name) {
+    storage.set('TG_USER_INFO', JSON.stringify({
+      id: targetAcc.user_id || targetAcc.id || 0,
+      first_name: targetAcc.first_name || '',
+      last_name: targetAcc.last_name || '',
+      username: targetAcc.username || '',
+      phone: targetAcc.phone || ''
+    }));
+  }
+
+  // 3. Send non-blocking activation command to backend with full account payload
+  try {
+    const data = await safeFetchJson(`/api/accounts/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: targetAcc.id,
+        phone: targetAcc.phone,
+        session_string: targetAcc.session_string,
+        api_id: targetAcc.api_id,
+        api_hash: targetAcc.api_hash,
+        user_id: targetAcc.user_id,
+        first_name: targetAcc.first_name,
+        last_name: targetAcc.last_name,
+        username: targetAcc.username
+      })
+    });
+    if (data.success && data.active_account) {
+      state.activeAccount = data.active_account;
       renderAccounts();
-      checkStatus();
-      loadStats();
-
-      // Background load groups without blocking UI
-      loadGroups(true);
-    } else {
-      showNotification(data.detail || data.error || 'Failed to switch account', 'error');
-      await loadAccounts();
     }
+    // Background refresh dialogs and status
+    loadGroups(true);
+    checkStatus();
   } catch (err) {
-    showNotification(err.message, 'error');
-    await loadAccounts();
+    console.warn('Background account switch sync note:', err);
   }
 }
 
