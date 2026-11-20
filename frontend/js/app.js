@@ -648,33 +648,9 @@ function openAccountsModal() {
 }
 
 function handleBroadcastModeChange() {
-  const isStopAfterFinish = document.getElementById('quickModeStop')?.checked ?? true;
   const btnText = document.getElementById('quickStartBtnText');
-  const intervalBox = document.getElementById('intervalSettingsBox');
-  const intervalHint = document.getElementById('intervalModeHint');
-  const stopLabel = document.getElementById('modeStopLabel');
-  const repeatLabel = document.getElementById('modeRepeatLabel');
-
-  if (isStopAfterFinish) {
-    if (btnText) btnText.innerText = 'START BROADCAST TO ALL GROUPS (Post Once & Stop)';
-    if (intervalBox) intervalBox.classList.add('opacity-60');
-    if (intervalHint) intervalHint.innerText = '(Disabled in Single-Round mode)';
-    if (stopLabel) {
-      stopLabel.className = 'flex items-start space-x-2.5 p-2.5 rounded-xl bg-brand-950/40 border border-brand-500/50 cursor-pointer transition';
-    }
-    if (repeatLabel) {
-      repeatLabel.className = 'flex items-start space-x-2.5 p-2.5 rounded-xl bg-slate-950/40 border border-darkBorder hover:border-slate-600 cursor-pointer transition';
-    }
-  } else {
-    if (btnText) btnText.innerText = 'START REPEATING AUTO-POSTER';
-    if (intervalBox) intervalBox.classList.remove('opacity-60');
-    if (intervalHint) intervalHint.innerText = '(Active - repeats every interval)';
-    if (repeatLabel) {
-      repeatLabel.className = 'flex items-start space-x-2.5 p-2.5 rounded-xl bg-brand-950/40 border border-brand-500/50 cursor-pointer transition';
-    }
-    if (stopLabel) {
-      stopLabel.className = 'flex items-start space-x-2.5 p-2.5 rounded-xl bg-slate-950/40 border border-darkBorder hover:border-slate-600 cursor-pointer transition';
-    }
+  if (btnText) {
+    btnText.innerText = 'START BROADCAST TO ALL GROUPS (Posts by Schedule & Stops When Done)';
   }
 }
 
@@ -1086,11 +1062,10 @@ function setQuickInterval(val, unit) {
 async function startQuickBroadcast() {
   const btn = document.getElementById('btnQuickStartBroadcast');
   const val = parseInt(document.getElementById('quickIntervalVal').value) || 30;
-  const unit = document.getElementById('quickIntervalUnit').value || 'minutes';
+  const unit = document.getElementById('quickIntervalUnit').value || 'seconds';
   const tplVal = document.getElementById('quickTemplateSelect').value;
   const delayMin = parseInt(document.getElementById('quickDelayMin').value) || 10;
   const delayMax = parseInt(document.getElementById('quickDelayMax').value) || 30;
-  const isStopAfterFinish = document.getElementById('quickModeStop')?.checked ?? true;
 
   if (state.groups.length === 0) {
     showNotification('No Telegram groups found on your active account! Please connect your Telegram account or click Refresh Groups.', 'warning');
@@ -1110,25 +1085,19 @@ async function startQuickBroadcast() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: isStopAfterFinish 
-          ? `Single-Round Broadcast (${state.groups.length} Groups)` 
-          : `All-Groups Broadcast (${val} ${unit})`,
+        name: `All-Groups Broadcast (Every ${val} ${unit})`,
         template_ids: templateIds,
         interval_val: val,
         interval_unit: unit,
         post_to_all: true,
         delay_min: delayMin,
         delay_max: delayMax,
-        stop_after_finish: isStopAfterFinish
+        stop_after_finish: true
       })
     });
     const data = await res.json();
     if (res.ok && data.success) {
-      if (isStopAfterFinish) {
-        showNotification(`🚀 Broadcast Launched! Bot is posting once to all ${state.groups.length} groups and will stop automatically when done.`, 'success');
-      } else {
-        showNotification(`🚀 Auto-Posting Started! Broadcasting to all ${state.groups.length} groups every ${val} ${unit}.`, 'success');
-      }
+      showNotification(`🚀 Broadcast started! Bot will post to all ${state.groups.length} groups every ${val} ${unit} according to schedule, and will stop working automatically when all groups are done.`, 'success');
       await loadCampaigns();
       await loadStats();
       await loadLogs();
@@ -1195,7 +1164,7 @@ function renderCampaigns() {
         const d = new Date(activeCamp.next_run);
         qNext.innerText = `${d.toLocaleTimeString()} (every ${activeCamp.interval_val} ${activeCamp.interval_unit})`;
       } else if (activeCamp.status === 'stopped' && (activeCamp.posts_sent || 0) > 0) {
-        qNext.innerText = 'Completed (Ready to run again)';
+        qNext.innerText = 'All groups completed (Bot stopped)';
       } else {
         qNext.innerText = activeCamp.status === 'running' ? 'Broadcasting now...' : 'None';
       }
