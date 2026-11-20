@@ -427,44 +427,60 @@ class TelegramManager:
             return {"success": False, "error": str(e)}
 
     async def request_qr_code(self, api_id: int, api_hash: str) -> Dict[str, Any]:
-        try:
-            api_id_val = int(api_id) if (api_id and int(api_id) > 0) else 21040435
-            api_hash_val = str(api_hash).strip() if (api_hash and str(api_hash).strip()) else "2d19c05868a10c46c95b6646710f1e73"
+        DEFAULT_API_ID = 21040435
+        DEFAULT_API_HASH = "2d19c05868a10c46c95b6646710f1e73"
 
-            if hasattr(self, "_qr_task") and self._qr_task and not self._qr_task.done():
-                self._qr_task.cancel()
-                try:
-                    await asyncio.wait_for(self._qr_task, timeout=1.0)
-                except Exception:
-                    pass
-            
-            if self.client and self.client.is_connected():
-                try:
-                    await asyncio.wait_for(self.client.disconnect(), timeout=3.0)
-                except Exception:
-                    pass
+        api_id_val = int(api_id) if (api_id and int(api_id) > 0) else DEFAULT_API_ID
+        api_hash_val = str(api_hash).strip() if (api_hash and str(api_hash).strip()) else DEFAULT_API_HASH
 
-            self.temp_api_id = api_id_val
-            self.temp_api_hash = api_hash_val
-            self.client = TelegramClient(StringSession(""), api_id_val, api_hash_val, auto_reconnect=True)
-            await asyncio.wait_for(self.client.connect(), timeout=12.0)
-            self.qr_instance = await self.client.qr_login()
-            self.qr_url = self.qr_instance.url
-            self.qr_done = False
-            self.qr_need_2fa = False
-            self.qr_error = None
-            self.qr_user = None
+        attempts = [(api_id_val, api_hash_val)]
+        if api_id_val != DEFAULT_API_ID or api_hash_val != DEFAULT_API_HASH:
+            attempts.append((DEFAULT_API_ID, DEFAULT_API_HASH))
 
-            self._qr_task = asyncio.create_task(self._qr_worker())
-            log_activity("INFO", "AUTH", "Started continuous Telegram QR login listener task")
-            return {
-                "success": True,
-                "url": self.qr_instance.url,
-                "expires": self.qr_instance.expires.isoformat() if getattr(self.qr_instance, "expires", None) else None
-            }
-        except Exception as e:
-            log_activity("ERROR", "AUTH", f"Failed to start QR login: {str(e)}")
-            return {"success": False, "error": f"Failed to connect to Telegram: {str(e)}"}
+        last_error = None
+        for attempt_id, attempt_hash in attempts:
+            try:
+                if hasattr(self, "_qr_task") and self._qr_task and not self._qr_task.done():
+                    self._qr_task.cancel()
+                    try:
+                        await asyncio.wait_for(self._qr_task, timeout=1.0)
+                    except Exception:
+                        pass
+                
+                if self.client and self.client.is_connected():
+                    try:
+                        await asyncio.wait_for(self.client.disconnect(), timeout=3.0)
+                    except Exception:
+                        pass
+
+                self.temp_api_id = attempt_id
+                self.temp_api_hash = attempt_hash
+                self.client = TelegramClient(StringSession(""), attempt_id, attempt_hash, auto_reconnect=True)
+                await asyncio.wait_for(self.client.connect(), timeout=12.0)
+                self.qr_instance = await self.client.qr_login()
+                self.qr_url = self.qr_instance.url
+                self.qr_done = False
+                self.qr_need_2fa = False
+                self.qr_error = None
+                self.qr_user = None
+
+                self._qr_task = asyncio.create_task(self._qr_worker())
+                log_activity("INFO", "AUTH", "Started continuous Telegram QR login listener task")
+                return {
+                    "success": True,
+                    "url": self.qr_instance.url,
+                    "expires": self.qr_instance.expires.isoformat() if getattr(self.qr_instance, "expires", None) else None
+                }
+            except errors.ApiIdInvalidError as api_err:
+                last_error = api_err
+                log_activity("WARN", "AUTH", f"App credentials invalid for QR login, attempting verified Telegram pair...")
+                continue
+            except Exception as e:
+                last_error = e
+                continue
+
+        log_activity("ERROR", "AUTH", f"Failed to start QR login: {str(last_error)}")
+        return {"success": False, "error": f"Failed to connect to Telegram: {str(last_error)}"}
 
     async def _qr_worker(self):
         while not self.qr_done and getattr(self, "qr_instance", None):

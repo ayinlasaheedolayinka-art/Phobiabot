@@ -486,14 +486,14 @@ async function startQrLogin() {
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-base"></i> <span>Connecting to Telegram...</span>';
   }
 
+  const QR_API_ID = 21040435;
+  const QR_API_HASH = '2d19c05868a10c46c95b6646710f1e73';
+
   const apiIdEl = document.getElementById('apiIdInput');
   const apiHashEl = document.getElementById('apiHashInput');
 
-  let parsedApiId = getValidApiId(apiIdEl?.value?.trim() || storage.get('TG_API_ID'));
-  let cleanApiHash = getValidApiHash(apiHashEl?.value?.trim() || storage.get('TG_API_HASH'));
-
-  if (apiIdEl) apiIdEl.value = parsedApiId;
-  if (apiHashEl) apiHashEl.value = cleanApiHash;
+  if (apiIdEl) apiIdEl.value = QR_API_ID;
+  if (apiHashEl) apiHashEl.value = QR_API_HASH;
 
   const modal = document.getElementById('qrModal');
   const qrLoading = document.getElementById('qrLoading');
@@ -517,8 +517,8 @@ async function startQrLogin() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        api_id: parsedApiId,
-        api_hash: cleanApiHash
+        api_id: QR_API_ID,
+        api_hash: QR_API_HASH
       })
     });
 
@@ -620,8 +620,8 @@ async function startQrLogin() {
             storage.set('TG_USER_INFO', JSON.stringify(checkData.user));
             if (checkData.user.phone) storage.set('TG_PHONE', checkData.user.phone);
           }
-          storage.set('TG_API_ID', parsedApiId);
-          storage.set('TG_API_HASH', cleanApiHash);
+          storage.set('TG_API_ID', QR_API_ID);
+          storage.set('TG_API_HASH', QR_API_HASH);
 
           // Non-blocking fast refresh of data
           checkStatus();
@@ -650,8 +650,8 @@ async function startQrLogin() {
                 storage.set('TG_USER_INFO', JSON.stringify(pwdData.user));
                 if (pwdData.user.phone) storage.set('TG_PHONE', pwdData.user.phone);
               }
-              storage.set('TG_API_ID', parsedApiId);
-              storage.set('TG_API_HASH', cleanApiHash);
+              storage.set('TG_API_ID', QR_API_ID);
+              storage.set('TG_API_HASH', QR_API_HASH);
 
               // Non-blocking fast refresh of data
               checkStatus();
