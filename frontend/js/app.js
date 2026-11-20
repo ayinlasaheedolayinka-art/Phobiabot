@@ -399,6 +399,123 @@ async function handleVerifyCode(e) {
   }
 }
 
+// ----------------- QR CODE LOGIN -----------------
+let qrCheckInterval = null;
+
+async function startQrLogin() {
+  const apiIdVal = document.getElementById('loginApiId')?.value?.trim();
+  const apiHashVal = document.getElementById('loginApiHash')?.value?.trim();
+
+  if (!apiIdVal || !apiHashVal) {
+    showNotification('Please enter Telegram API ID and API Hash first', 'warning');
+    return;
+  }
+
+  const modal = document.getElementById('qrModal');
+  const qrLoading = document.getElementById('qrLoading');
+  const qrImage = document.getElementById('qrImage');
+  const qrStatusText = document.getElementById('qrStatusText');
+  const qrDirectLink = document.getElementById('qrDirectLink');
+
+  modal?.classList.remove('hidden');
+  qrLoading?.classList.remove('hidden');
+  qrImage?.classList.add('hidden');
+  if (qrStatusText) qrStatusText.innerText = 'Connecting to Telegram...';
+
+  try {
+    const res = await fetch('/api/auth/qr-start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_id: parseInt(apiIdVal, 10),
+        api_hash: apiHashVal
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.detail || data.error || 'Failed to generate QR code');
+    }
+
+    const qrUrl = data.url;
+    const qrImgSrc = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrUrl)}`;
+    
+    if (qrImage) {
+      qrImage.src = qrImgSrc;
+      qrImage.onload = () => {
+        qrLoading?.classList.add('hidden');
+        qrImage?.classList.remove('hidden');
+      };
+    }
+    if (qrDirectLink) {
+      qrDirectLink.href = qrUrl;
+      qrDirectLink.classList.remove('hidden');
+    }
+    if (qrStatusText) {
+      qrStatusText.innerHTML = '<i class="fa-solid fa-radar mr-1"></i> Waiting for scan... (Auto-confirms immediately)';
+    }
+
+    if (qrCheckInterval) clearInterval(qrCheckInterval);
+    qrCheckInterval = setInterval(async () => {
+      try {
+        const checkRes = await fetch('/api/auth/qr-check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const checkData = await checkRes.json();
+        if (checkData.success) {
+          clearInterval(qrCheckInterval);
+          closeQrModal();
+          showNotification('Logged in successfully via Telegram QR Code!', 'success');
+          await checkStatus();
+          await loadAccounts();
+          await loadGroups(true);
+          await loadStats();
+          toggleAddAccountForm(false);
+          switchTab('tab-poster');
+        } else if (checkData.need_2fa) {
+          clearInterval(qrCheckInterval);
+          const pwd = prompt('This Telegram account has Two-Factor Authentication (2FA) password enabled. Please enter your 2FA password:');
+          if (pwd) {
+            const pwdRes = await fetch('/api/auth/qr-check', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password: pwd })
+            });
+            const pwdData = await pwdRes.json();
+            if (pwdData.success) {
+              closeQrModal();
+              showNotification('Logged in successfully via Telegram QR Code!', 'success');
+              await checkStatus();
+              await loadAccounts();
+              await loadGroups(true);
+              await loadStats();
+              toggleAddAccountForm(false);
+              switchTab('tab-poster');
+            } else {
+              showNotification(pwdData.error || '2FA verification failed', 'error');
+            }
+          }
+        }
+      } catch (e) {
+        // Wait for scan
+      }
+    }, 2000);
+
+  } catch (err) {
+    showNotification(err.message, 'error');
+    closeQrModal();
+  }
+}
+
+function closeQrModal() {
+  if (qrCheckInterval) {
+    clearInterval(qrCheckInterval);
+    qrCheckInterval = null;
+  }
+  document.getElementById('qrModal')?.classList.add('hidden');
+}
+
 async function logoutTelegram() {
   if (!confirm('Are you sure you want to log out of Telegram?')) return;
   try {

@@ -419,6 +419,66 @@ class TelegramManager:
             log_activity("ERROR", "AUTH", f"Sign in failed: {str(e)}")
             return {"success": False, "error": str(e)}
 
+    async def request_qr_code(self, api_id: int, api_hash: str) -> Dict[str, Any]:
+        if self.client and self.client.is_connected():
+            try:
+                await self.client.disconnect()
+            except Exception:
+                pass
+        self.temp_api_id = api_id
+        self.temp_api_hash = api_hash
+        self.client = TelegramClient(StringSession(""), api_id, api_hash, auto_reconnect=True)
+        await self.client.connect()
+        self.qr_instance = await self.client.qr_login()
+        log_activity("INFO", "AUTH", "Generated Telegram QR login session")
+        return {
+            "success": True,
+            "url": self.qr_instance.url,
+            "expires": self.qr_instance.expires.isoformat() if getattr(self.qr_instance, "expires", None) else None
+        }
+
+    async def check_qr_login(self, password: Optional[str] = None) -> Dict[str, Any]:
+        if not hasattr(self, "qr_instance") or not self.qr_instance or not self.client:
+            return {"success": False, "error": "No QR login session active"}
+        try:
+            try:
+                user = await asyncio.wait_for(self.qr_instance.wait(), timeout=3.0)
+            except asyncio.TimeoutError:
+                return {"success": False, "waiting": True}
+            except errors.SessionPasswordNeededError:
+                if not password:
+                    return {"success": False, "need_2fa": True, "message": "Two-factor authentication (2FA) password required"}
+                user = await self.client.sign_in(password=password)
+
+            saved_str = self.client.session.save()
+            me = await self.client.get_me()
+            self._cached_user = {
+                "id": me.id,
+                "first_name": me.first_name or "",
+                "last_name": me.last_name or "",
+                "username": me.username or "",
+                "phone": me.phone or ""
+            }
+            self._last_user_check = time.time()
+            set_setting("user_info", json.dumps(self._cached_user))
+            set_setting("is_connected", "1")
+            self._start_keep_alive()
+
+            api_id_val = int(getattr(self, "temp_api_id", 0) or get_setting("api_id") or 0)
+            api_hash_val = getattr(self, "temp_api_hash", "") or get_setting("api_hash") or ""
+            save_or_update_account(
+                phone=self._cached_user.get("phone") or "qr_account",
+                api_id=api_id_val,
+                api_hash=api_hash_val,
+                session_string=saved_str,
+                user=self._cached_user,
+                make_active=True
+            )
+            log_activity("SUCCESS", "AUTH", f"Successfully logged into Telegram via QR Code as {me.first_name}!")
+            return {"success": True, "user": self._cached_user, "session_string": saved_str}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     async def switch_account(self, account_id: int) -> Dict[str, Any]:
         acc = set_active_account(account_id)
         if not acc:

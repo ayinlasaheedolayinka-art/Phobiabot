@@ -60,6 +60,13 @@ class VerifyCodeRequest(BaseModel):
     code: str
     password: Optional[str] = None
 
+class QRStartRequest(BaseModel):
+    api_id: int
+    api_hash: str
+
+class QRCheckRequest(BaseModel):
+    password: Optional[str] = None
+
 class RestoreSessionRequest(BaseModel):
     session_string: str
     api_id: Optional[int] = None
@@ -158,6 +165,20 @@ async def verify_code(req: VerifyCodeRequest):
         if res.get("need_2fa"):
             return res
         raise HTTPException(status_code=400, detail=res.get("error", "Sign-in failed"))
+    return res
+
+@app.post("/api/auth/qr-start")
+async def qr_start(req: QRStartRequest):
+    tg = TelegramManager.get_instance()
+    res = await tg.request_qr_code(req.api_id, req.api_hash)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Failed to start QR login"))
+    return res
+
+@app.post("/api/auth/qr-check")
+async def qr_check(req: QRCheckRequest):
+    tg = TelegramManager.get_instance()
+    res = await tg.check_qr_login(req.password)
     return res
 
 @app.post("/api/auth/logout")
