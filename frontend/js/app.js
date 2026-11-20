@@ -76,6 +76,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (phoneEl && !phoneEl.value) phoneEl.value = savedPhone;
   } catch (e) {}
 
+  // Instant rendering of connected user status from permanent browser storage so mobile renders in 0ms
+  try {
+    const savedUser = JSON.parse(storage.get('TG_USER_INFO') || 'null');
+    const savedSession = storage.get('TG_SESSION_STRING');
+    if (savedSession && savedUser) {
+      const sidebarDot = document.getElementById('accountStatusDot');
+      const sidebarName = document.getElementById('accountName');
+      const sidebarSub = document.getElementById('accountSub');
+      const unauthAlert = document.getElementById('unauthAlert');
+      const btnLogout = document.getElementById('btnLogout');
+      if (unauthAlert) unauthAlert.classList.add('hidden');
+      if (btnLogout) btnLogout.classList.remove('hidden');
+      if (sidebarDot) sidebarDot.className = 'w-3 h-3 rounded-full bg-brand-400 pulse-emerald';
+      if (sidebarName) sidebarName.innerText = savedUser.first_name + (savedUser.username ? ` (@${savedUser.username})` : '');
+      if (sidebarSub) sidebarSub.innerText = savedUser.phone ? `+${savedUser.phone}` : 'Connected';
+    }
+  } catch (e) {}
+
   // Immediate rendering of fast metrics so mobile screen displays in ~100ms
   loadStats();
   loadLogs();
@@ -96,23 +114,33 @@ document.addEventListener('DOMContentLoaded', () => {
 // Navigation Handling
 function setupNavigation() {
   const tabs = document.querySelectorAll('.nav-tab');
+  const mobileBtn = document.getElementById('mobileMenuBtn');
+  const sidebar = document.getElementById('sidebar');
+
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
       const target = tab.getAttribute('data-tab');
       switchTab(target);
       // Auto-close mobile drawer when user taps a navigation link
-      const sidebar = document.getElementById('sidebar');
       if (window.innerWidth < 768 && sidebar) {
         sidebar.classList.add('hidden');
+        const icon = mobileBtn?.querySelector('i');
+        if (icon) icon.className = 'fa-solid fa-bars text-xl';
       }
     });
   });
 
-  const mobileBtn = document.getElementById('mobileMenuBtn');
-  const sidebar = document.getElementById('sidebar');
   if (mobileBtn && sidebar) {
     mobileBtn.addEventListener('click', () => {
       sidebar.classList.toggle('hidden');
+      const icon = mobileBtn.querySelector('i');
+      if (icon) {
+        if (sidebar.classList.contains('hidden')) {
+          icon.className = 'fa-solid fa-bars text-xl';
+        } else {
+          icon.className = 'fa-solid fa-xmark text-xl text-white';
+        }
+      }
     });
   }
 }
@@ -518,6 +546,16 @@ async function startQrLogin() {
           clearInterval(qrCheckInterval);
           closeQrModal();
           showNotification('Logged in successfully via Telegram QR Code!', 'success');
+
+          // Permanently preserve session and account credentials in browser storage
+          if (checkData.session_string) storage.set('TG_SESSION_STRING', checkData.session_string);
+          if (checkData.user) {
+            storage.set('TG_USER_INFO', JSON.stringify(checkData.user));
+            if (checkData.user.phone) storage.set('TG_PHONE', checkData.user.phone);
+          }
+          if (apiIdVal) storage.set('TG_API_ID', apiIdVal);
+          if (apiHashVal) storage.set('TG_API_HASH', apiHashVal);
+
           await checkStatus();
           await loadAccounts();
           await loadGroups(true);
@@ -538,6 +576,16 @@ async function startQrLogin() {
             if (pwdData.success) {
               closeQrModal();
               showNotification('Logged in successfully via Telegram QR Code!', 'success');
+
+              // Permanently preserve session and account credentials in browser storage
+              if (pwdData.session_string) storage.set('TG_SESSION_STRING', pwdData.session_string);
+              if (pwdData.user) {
+                storage.set('TG_USER_INFO', JSON.stringify(pwdData.user));
+                if (pwdData.user.phone) storage.set('TG_PHONE', pwdData.user.phone);
+              }
+              if (apiIdVal) storage.set('TG_API_ID', apiIdVal);
+              if (apiHashVal) storage.set('TG_API_HASH', apiHashVal);
+
               await checkStatus();
               await loadAccounts();
               await loadGroups(true);

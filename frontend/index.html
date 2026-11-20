@@ -445,8 +445,8 @@
             </div>
 
             <div class="space-y-2 pt-2">
-              <button id="btnQuickStartBroadcast" onclick="startQuickBroadcast()" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-brand-600 via-emerald-500 to-teal-600 hover:from-brand-500 hover:to-teal-500 text-white font-extrabold text-sm tracking-wide shadow-xl shadow-brand-600/30 flex items-center justify-center gap-2.5 transition transform active:scale-[0.99]">
-                <i class="fa-solid fa-play"></i> <span id="quickStartBtnText">START BROADCAST TO ALL GROUPS (Posts by Schedule & Stops When Done)</span>
+              <button id="btnQuickStartBroadcast" onclick="startQuickBroadcast()" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-brand-600 via-emerald-500 to-teal-600 hover:from-brand-500 hover:to-teal-500 text-white font-extrabold text-sm tracking-wide shadow-xl shadow-brand-600/30 flex items-center justify-center gap-2 transition transform active:scale-[0.99]">
+                <i class="fa-solid fa-play"></i> <span id="quickStartBtnText">START BROADCAST (Posts by Schedule & Stops When Done)</span>
               </button>
               <div class="grid grid-cols-2 gap-2">
                 <button onclick="pauseQuickBroadcast()" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5">
@@ -763,7 +763,7 @@
 
   <!-- MODAL: QR Code Login -->
   <div id="qrModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
-    <div class="bg-darkCard border border-darkBorder w-full max-w-md rounded-2xl p-6 space-y-5 shadow-2xl text-center">
+    <div class="bg-darkCard border border-darkBorder w-full max-w-md rounded-2xl p-6 space-y-5 shadow-2xl text-center max-h-[92vh] overflow-y-auto">
       <div class="flex items-center justify-between border-b border-darkBorder pb-4">
         <div class="flex items-center space-x-2 text-cyan-400">
           <i class="fa-solid fa-qrcode text-lg"></i>
@@ -797,8 +797,8 @@
         </p>
 
         <div>
-          <a id="qrDirectLink" href="#" class="hidden inline-block text-xs text-cyan-400 hover:underline font-semibold bg-cyan-950/40 border border-cyan-800/40 px-3 py-1.5 rounded-lg">
-            <i class="fa-solid fa-arrow-up-right-from-square mr-1"></i> Tap here if on mobile to open in Telegram
+          <a id="qrDirectLink" href="#" class="hidden inline-flex items-center justify-center gap-2 w-full py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-lg transition">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i> Open Telegram Directly on this Device
           </a>
         </div>
       </div>
@@ -811,7 +811,7 @@
 
   <!-- MODAL: OTP Verification -->
   <div id="otpModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
-    <div class="bg-darkCard border border-darkBorder w-full max-w-md rounded-2xl p-6 space-y-5 shadow-2xl">
+    <div class="bg-darkCard border border-darkBorder w-full max-w-md rounded-2xl p-6 space-y-5 shadow-2xl max-h-[92vh] overflow-y-auto">
       <div class="flex items-center justify-between border-b border-darkBorder pb-4">
         <h3 class="font-bold text-lg text-white">Enter Telegram OTP Code</h3>
         <button onclick="closeModal('otpModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
@@ -839,7 +839,7 @@
 
   <!-- MODAL: Template Create / Edit -->
   <div id="templateModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
-    <div class="bg-darkCard border border-darkBorder w-full max-w-xl rounded-2xl p-6 space-y-4 shadow-2xl">
+    <div class="bg-darkCard border border-darkBorder w-full max-w-xl rounded-2xl p-6 space-y-4 shadow-2xl max-h-[92vh] overflow-y-auto">
       <div class="flex items-center justify-between border-b border-darkBorder pb-3">
         <h3 id="templateModalTitle" class="font-bold text-lg text-white">Create Content Template</h3>
         <button onclick="closeModal('templateModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
