@@ -603,13 +603,13 @@ class TelegramManager:
 
         log_activity("SUCCESS", "AUTH", f"Switched working Telegram account to {user_display} {phone_display}")
 
-        # Fetch groups for new active account immediately
-        groups = await self.get_dialogs_and_groups(force_refresh=True)
+        # Refresh groups in background task without blocking the HTTP response
+        asyncio.create_task(self.get_dialogs_and_groups(force_refresh=True))
 
         return {
             "success": True,
             "active_account": acc,
-            "groups_count": len(groups)
+            "groups_count": len(self._cached_groups)
         }
 
     async def logout(self) -> Dict[str, Any]:

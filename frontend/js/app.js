@@ -555,7 +555,9 @@ async function startQrLogin() {
         if (checkData.success) {
           clearInterval(qrCheckInterval);
           closeQrModal();
-          showNotification('Logged in successfully via Telegram QR Code!', 'success');
+          toggleAddAccountForm(false);
+          switchTab('tab-poster');
+          showNotification(`Logged in successfully as ${checkData.user?.first_name || 'Telegram User'}!`, 'success');
 
           // Permanently preserve session and account credentials in browser storage
           if (checkData.session_string) storage.set('TG_SESSION_STRING', checkData.session_string);
@@ -566,13 +568,12 @@ async function startQrLogin() {
           if (apiIdVal) storage.set('TG_API_ID', apiIdVal);
           if (apiHashVal) storage.set('TG_API_HASH', apiHashVal);
 
-          await checkStatus();
-          await loadAccounts();
-          await loadGroups(true);
-          await loadStats();
-          await loadTemplates();
-          toggleAddAccountForm(false);
-          switchTab('tab-poster');
+          // Non-blocking fast refresh of data
+          checkStatus();
+          loadAccounts();
+          loadStats();
+          loadTemplates();
+          loadGroups(true);
         } else if (checkData.need_2fa) {
           clearInterval(qrCheckInterval);
           const pwd = prompt('This Telegram account has Two-Factor Authentication (2FA) password enabled. Please enter your 2FA password:');
@@ -585,7 +586,9 @@ async function startQrLogin() {
             const pwdData = await pwdRes.json();
             if (pwdData.success) {
               closeQrModal();
-              showNotification('Logged in successfully via Telegram QR Code!', 'success');
+              toggleAddAccountForm(false);
+              switchTab('tab-poster');
+              showNotification(`Logged in successfully as ${pwdData.user?.first_name || 'Telegram User'}!`, 'success');
 
               // Permanently preserve session and account credentials in browser storage
               if (pwdData.session_string) storage.set('TG_SESSION_STRING', pwdData.session_string);
@@ -596,13 +599,12 @@ async function startQrLogin() {
               if (apiIdVal) storage.set('TG_API_ID', apiIdVal);
               if (apiHashVal) storage.set('TG_API_HASH', apiHashVal);
 
-              await checkStatus();
-              await loadAccounts();
-              await loadGroups(true);
-              await loadStats();
-              await loadTemplates();
-              toggleAddAccountForm(false);
-              switchTab('tab-poster');
+              // Non-blocking fast refresh of data
+              checkStatus();
+              loadAccounts();
+              loadStats();
+              loadTemplates();
+              loadGroups(true);
             } else {
               showNotification(pwdData.error || '2FA verification failed', 'error');
             }
@@ -611,7 +613,7 @@ async function startQrLogin() {
       } catch (e) {
         // Keep waiting for scan
       }
-    }, 2000);
+    }, 1000);
 
   } catch (err) {
     showNotification(err.message, 'error');
@@ -814,7 +816,14 @@ function renderAccounts() {
 }
 
 async function switchTelegramAccount(accountId) {
+  // Give instant feedback on the clicked button
+  const btns = document.querySelectorAll(`button[onclick*="switchTelegramAccount(${accountId})"]`);
+  btns.forEach(b => {
+    b.disabled = true;
+    b.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Switching...';
+  });
   showNotification('Switching working Telegram account...', 'info');
+
   try {
     const res = await fetch(`/api/accounts/${accountId}/activate`, {
       method: 'POST'
@@ -823,16 +832,39 @@ async function switchTelegramAccount(accountId) {
     if (res.ok && data.success) {
       const active = data.active_account || {};
       const name = active.first_name || 'Account';
-      showNotification(`Switched working account to ${name}! Discovered ${data.groups_count || 0} groups.`, 'success');
-      await loadAccounts();
-      await loadGroups(true);
-      await checkStatus();
-      await loadStats();
+      showNotification(`Switched working account to ${name}!`, 'success');
+
+      // Update local storage so session persists on this new account
+      if (active.session_string) storage.set('TG_SESSION_STRING', active.session_string);
+      if (active.phone) storage.set('TG_PHONE', active.phone);
+      if (active.api_id) storage.set('TG_API_ID', active.api_id);
+      if (active.api_hash) storage.set('TG_API_HASH', active.api_hash);
+      storage.set('TG_USER_INFO', JSON.stringify({
+        id: active.user_id,
+        first_name: active.first_name,
+        last_name: active.last_name,
+        username: active.username,
+        phone: active.phone
+      }));
+
+      // Immediate refresh of accounts and header UI in 0ms
+      state.activeAccount = active;
+      if (state.accounts) {
+        state.accounts.forEach(a => { a.is_active = (a.id === accountId ? 1 : 0); });
+      }
+      renderAccounts();
+      checkStatus();
+      loadStats();
+
+      // Background load groups without blocking UI
+      loadGroups(true);
     } else {
       showNotification(data.detail || data.error || 'Failed to switch account', 'error');
+      await loadAccounts();
     }
   } catch (err) {
     showNotification(err.message, 'error');
+    await loadAccounts();
   }
 }
 
