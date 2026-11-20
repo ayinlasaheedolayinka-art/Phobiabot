@@ -267,6 +267,21 @@ class TelegramManager:
         accounts = get_accounts()
         active_acc = get_active_account()
 
+        # Always guarantee that user_info matches the currently active account
+        if active_acc:
+            user_info = {
+                "id": active_acc.get("user_id", 0),
+                "first_name": active_acc.get("first_name", ""),
+                "last_name": active_acc.get("last_name", ""),
+                "username": active_acc.get("username", ""),
+                "phone": active_acc.get("phone", "")
+            }
+            clean_active_phone = str(active_acc.get("phone", "")).lstrip("+")
+            if self._cached_user and str(self._cached_user.get("phone", "")).lstrip("+") == clean_active_phone:
+                user_info = self._cached_user
+        elif not user_info and self._cached_user:
+            user_info = self._cached_user
+
         return {
             "has_credentials": has_creds,
             "is_authorized": is_auth,
@@ -655,8 +670,10 @@ class TelegramManager:
             "username": acc.get("username", ""),
             "phone": acc.get("phone", "")
         }
+        self._last_user_check = 0
         self._cached_groups = []
         self._cached_groups_time = 0
+        set_setting("cached_groups_count", "0")
 
         # Connect in background so API responds in 5ms
         async def _connect_switched():
@@ -666,7 +683,32 @@ class TelegramManager:
                         await old_client.disconnect()
                 except Exception:
                     pass
-            await self.get_client()
+            client = await self.get_client()
+            if client and await client.is_user_authorized():
+                try:
+                    me = await client.get_me()
+                    if me:
+                        fresh_user = {
+                            "id": me.id,
+                            "first_name": me.first_name or "",
+                            "last_name": me.last_name or "",
+                            "username": me.username or "",
+                            "phone": me.phone or acc.get("phone", ""),
+                            "is_premium": getattr(me, "premium", False)
+                        }
+                        self._cached_user = fresh_user
+                        self._last_user_check = time.time()
+                        set_setting("user_info", json.dumps(fresh_user))
+                        save_or_update_account(
+                            phone=fresh_user["phone"] or acc.get("phone"),
+                            api_id=int(acc.get("api_id") or 21040435),
+                            api_hash=acc.get("api_hash") or "2d19c05868a10c46c95b6646710f1e73",
+                            session_string=acc.get("session_string"),
+                            user=fresh_user,
+                            make_active=True
+                        )
+                except Exception as e:
+                    log_activity("WARN", "AUTH", f"Switched client get_me notice: {e}")
             self._start_keep_alive()
             await self.get_dialogs_and_groups(force_refresh=True)
 

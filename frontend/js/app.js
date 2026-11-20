@@ -198,6 +198,7 @@ function switchTab(tabId) {
   });
 
   // Lazy loaders based on active tab
+  if (tabId === 'tab-dashboard') { renderAccounts(); loadStats(); loadGroups(); loadAccounts(); }
   if (tabId === 'tab-templates') loadTemplates();
   if (tabId === 'tab-poster') { loadCampaigns(); loadGroups(); loadTemplates(); loadAccounts(); handleBroadcastModeChange(); }
   if (tabId === 'tab-scout') loadKeywords();
@@ -278,32 +279,32 @@ async function checkStatus() {
     const setupDesc = document.getElementById('setupStatusDesc');
     const btnLogout = document.getElementById('btnLogout');
 
-    if (tg.is_authorized && tg.user) {
-      if (unauthAlert) unauthAlert.classList.add('hidden');
-      
-      if (sidebarDot) sidebarDot.className = 'w-3 h-3 rounded-full bg-brand-400 pulse-emerald';
-      if (sidebarName) sidebarName.innerText = tg.user.first_name + (tg.user.username ? ` (@${tg.user.username})` : '');
-      if (sidebarSub) sidebarSub.innerText = tg.user.phone ? `+${tg.user.phone}` : 'Connected';
+    const activeUser = tg.active_account || tg.user || state.activeAccount;
 
-      if (setupDot) setupDot.className = 'w-3.5 h-3.5 rounded-full bg-brand-400';
-      if (setupTitle) setupTitle.innerText = 'Connected';
-      if (setupDesc) setupDesc.innerText = `Logged in as ${tg.user.first_name} (@${tg.user.username || 'No Handle'})`;
+    if (tg.is_authorized && activeUser) {
+      if (unauthAlert) unauthAlert.classList.add('hidden');
       if (btnLogout) btnLogout.classList.remove('hidden');
+
+      state.activeAccount = activeUser;
+      if (tg.accounts && tg.accounts.length > 0) {
+        state.accounts = tg.accounts;
+      }
+      renderAccounts();
 
       if (tg.api_id) {
         const el = document.getElementById('apiIdInput');
         if (el) el.value = tg.api_id;
         storage.set('TG_API_ID', tg.api_id);
       }
-      if (tg.phone) {
+      if (activeUser.phone) {
         const el = document.getElementById('phoneInput');
-        if (el) el.value = tg.phone;
-        storage.set('TG_PHONE', tg.phone);
+        if (el) el.value = activeUser.phone;
+        storage.set('TG_PHONE', activeUser.phone);
       }
       if (tg.session_string) {
         storage.set('TG_SESSION_STRING', tg.session_string);
       }
-      storage.set('TG_USER_INFO', JSON.stringify(tg.user));
+      storage.set('TG_USER_INFO', JSON.stringify(activeUser));
     } else {
       // Auto-restore session from browser storage if server rebooted or spun down
       const savedSession = storage.get('TG_SESSION_STRING');
@@ -786,7 +787,18 @@ async function loadAccounts() {
 
 function renderAccounts() {
   const accounts = state.accounts || [];
-  const active = state.activeAccount || accounts.find(a => a.is_active) || null;
+  const active = state.activeAccount || accounts.find(a => a.is_active) || (accounts.length > 0 ? accounts[0] : null);
+
+  const isAccActive = (acc) => {
+    if (!active) return false;
+    if (active.id && acc.id && String(active.id) === String(acc.id)) return true;
+    if (active.phone && acc.phone) {
+      const p1 = String(active.phone).replace(/\D/g, '');
+      const p2 = String(acc.phone).replace(/\D/g, '');
+      if (p1 && p2 && p1 === p2) return true;
+    }
+    return false;
+  };
 
   // 1. Settings tab badge
   const badge = document.getElementById('settingsAccountCountBadge');
@@ -800,14 +812,74 @@ function renderAccounts() {
     if (active) {
       const name = `${active.first_name || ''} ${active.last_name || ''}`.trim() || 'Telegram User';
       const handle = active.username ? ` (@${active.username})` : '';
-      const phone = active.phone ? ` • +${active.phone}` : '';
+      const phone = active.phone ? ` • +${String(active.phone).replace(/^\+/, '')}` : '';
       posterAccName.innerText = `${name}${handle}${phone}`;
     } else {
       posterAccName.innerText = 'No account connected';
     }
   }
 
-  // 3. Settings tab accounts list
+  // 3. Operations Dashboard Active Working Account Card
+  const dashCard = document.getElementById('dashActiveAccountCard');
+  const dashAvatar = document.getElementById('dashAccountAvatar');
+  const dashName = document.getElementById('dashAccountName');
+  const dashSub = document.getElementById('dashAccountSub');
+  if (dashCard) {
+    if (active) {
+      dashCard.classList.remove('hidden');
+      const name = `${active.first_name || ''} ${active.last_name || ''}`.trim() || 'Telegram User';
+      const handle = active.username ? `@${active.username}` : 'No handle';
+      const phone = active.phone ? `+${String(active.phone).replace(/^\+/, '')}` : '';
+      if (dashAvatar) dashAvatar.innerText = (active.first_name || 'T')[0].toUpperCase();
+      if (dashName) dashName.innerText = `${name} (${handle})`;
+      if (dashSub) dashSub.innerText = `${phone} • Auto-Broadcaster & Lead Scout run with this active account`;
+    } else {
+      if (dashName) dashName.innerText = 'No Account Connected';
+      if (dashSub) dashSub.innerText = 'Connect or select an account below';
+    }
+  }
+
+  // 4. Mobile Header Quick Account Switcher Pill
+  const mobilePill = document.getElementById('mobileActiveAccountPill');
+  const mobileName = document.getElementById('mobileActiveAccountName');
+  if (mobilePill && mobileName) {
+    if (active) {
+      mobilePill.classList.remove('hidden');
+      mobileName.innerText = active.first_name || active.username || 'Connected';
+    } else {
+      mobilePill.classList.add('hidden');
+    }
+  }
+
+  // 5. Sidebar account footer update
+  const sidebarDot = document.getElementById('accountStatusDot');
+  const sidebarName = document.getElementById('accountName');
+  const sidebarSub = document.getElementById('accountSub');
+  if (active) {
+    if (sidebarDot) sidebarDot.className = 'w-2.5 h-2.5 rounded-full bg-brand-400 pulse-emerald';
+    if (sidebarName) sidebarName.innerText = `${active.first_name || 'Telegram User'} ${active.username ? `(@${active.username})` : ''}`;
+    if (sidebarSub) sidebarSub.innerText = `${accounts.length} ${accounts.length === 1 ? 'Account' : 'Accounts'} • Active`;
+  } else if (accounts.length > 0) {
+    if (sidebarDot) sidebarDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
+    if (sidebarName) sidebarName.innerText = 'Select Working Account';
+    if (sidebarSub) sidebarSub.innerText = `${accounts.length} Accounts Connected`;
+  } else {
+    if (sidebarDot) sidebarDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
+    if (sidebarName) sidebarName.innerText = 'Not Connected';
+    if (sidebarSub) sidebarSub.innerText = 'Connect Telegram';
+  }
+
+  // 6. Settings tab top setup card
+  const setupDot = document.getElementById('setupDot');
+  const setupTitle = document.getElementById('setupStatusTitle');
+  const setupDesc = document.getElementById('setupStatusDesc');
+  if (active) {
+    if (setupDot) setupDot.className = 'w-3.5 h-3.5 rounded-full bg-brand-400';
+    if (setupTitle) setupTitle.innerText = 'Connected';
+    if (setupDesc) setupDesc.innerText = `Active Account: ${active.first_name || 'User'} (@${active.username || 'No Handle'}) • +${String(active.phone || '').replace(/^\+/, '')}`;
+  }
+
+  // 7. Settings tab accounts list
   const container = document.getElementById('accountsListContainer');
   if (container) {
     if (accounts.length === 0) {
@@ -822,10 +894,11 @@ function renderAccounts() {
       `;
     } else {
       container.innerHTML = accounts.map(acc => {
-        const isActive = active && (active.id === acc.id);
+        const isActive = isAccActive(acc);
         const fullName = `${acc.first_name || ''} ${acc.last_name || ''}`.trim() || 'Telegram User';
         const handle = acc.username ? `@${acc.username}` : 'No username';
-        const phone = acc.phone ? `+${acc.phone}` : '';
+        const phone = acc.phone ? `+${String(acc.phone).replace(/^\+/, '')}` : '';
+        const switchArg = acc.phone ? `'${escapeHtml(acc.phone)}'` : acc.id;
 
         return `
           <div class="p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
@@ -855,7 +928,7 @@ function renderAccounts() {
 
             <div class="flex items-center space-x-2 self-end sm:self-center flex-shrink-0">
               ${!isActive 
-                ? `<button onclick="switchTelegramAccount(${acc.id})" class="px-3.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-brand-600/20">
+                ? `<button onclick="switchTelegramAccount(${switchArg})" class="px-3.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-brand-600/20">
                     <i class="fa-solid fa-repeat"></i> Switch to This Account
                    </button>`
                 : `<span class="text-xs text-brand-400 font-semibold px-2 py-1 flex items-center gap-1"><i class="fa-solid fa-check"></i> Current Working Account</span>`
@@ -870,17 +943,18 @@ function renderAccounts() {
     }
   }
 
-  // 4. Modal accounts list
+  // 8. Modal accounts list
   const modalList = document.getElementById('modalAccountsList');
   if (modalList) {
     if (accounts.length === 0) {
       modalList.innerHTML = `<p class="p-4 text-center text-xs text-slate-500">No accounts saved yet.</p>`;
     } else {
       modalList.innerHTML = accounts.map(acc => {
-        const isActive = active && (active.id === acc.id);
+        const isActive = isAccActive(acc);
         const fullName = `${acc.first_name || ''} ${acc.last_name || ''}`.trim() || 'Telegram User';
         const handle = acc.username ? `@${acc.username}` : '';
-        const phone = acc.phone ? `+${acc.phone}` : '';
+        const phone = acc.phone ? `+${String(acc.phone).replace(/^\+/, '')}` : '';
+        const switchArg = acc.phone ? `'${escapeHtml(acc.phone)}'` : acc.id;
 
         return `
           <div class="p-3 rounded-xl border flex items-center justify-between gap-3 ${
@@ -900,7 +974,7 @@ function renderAccounts() {
             <div>
               ${isActive 
                 ? `<span class="text-brand-400 text-xs font-bold px-2 py-1"><i class="fa-solid fa-circle-check mr-1"></i> Active</span>`
-                : `<button onclick="switchTelegramAccount(${acc.id}); closeModal('accountsModal');" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-brand-600 text-slate-200 hover:text-white text-xs font-bold transition flex items-center gap-1">
+                : `<button onclick="switchTelegramAccount(${switchArg}); closeModal('accountsModal');" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-brand-600 text-slate-200 hover:text-white text-xs font-bold transition flex items-center gap-1">
                     <i class="fa-solid fa-repeat"></i> Switch
                    </button>`
               }
@@ -910,62 +984,57 @@ function renderAccounts() {
       }).join('');
     }
   }
-
-  // 5. Sidebar account footer update
-  const sidebarDot = document.getElementById('accountStatusDot');
-  const sidebarName = document.getElementById('accountName');
-  const sidebarSub = document.getElementById('accountSub');
-  if (active) {
-    if (sidebarDot) sidebarDot.className = 'w-2.5 h-2.5 rounded-full bg-brand-400 pulse-emerald';
-    if (sidebarName) sidebarName.innerText = `${active.first_name || 'Telegram User'} ${active.username ? `(@${active.username})` : ''}`;
-    if (sidebarSub) sidebarSub.innerText = `${accounts.length} ${accounts.length === 1 ? 'Account' : 'Accounts'} • Active`;
-  } else if (accounts.length > 0) {
-    if (sidebarDot) sidebarDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
-    if (sidebarName) sidebarName.innerText = 'Select Working Account';
-    if (sidebarSub) sidebarSub.innerText = `${accounts.length} Accounts Connected`;
-  } else {
-    if (sidebarDot) sidebarDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
-    if (sidebarName) sidebarName.innerText = 'Not Connected';
-    if (sidebarSub) sidebarSub.innerText = 'Connect Telegram';
-  }
 }
 
 async function switchTelegramAccount(accountIdentifier) {
-  // 1. Optimistic Instant UI Update (0ms latency!)
-  let targetAcc = (state.accounts || []).find(a => String(a.id) === String(accountIdentifier) || a.phone === String(accountIdentifier));
+  const cleanId = String(accountIdentifier).trim();
+  const cleanDigits = cleanId.replace(/\D/g, '');
+
+  let targetAcc = (state.accounts || []).find(a => 
+    String(a.id) === cleanId || 
+    a.phone === cleanId || 
+    (cleanDigits && a.phone && String(a.phone).replace(/\D/g, '') === cleanDigits)
+  );
+
   if (!targetAcc) {
-    targetAcc = { id: accountIdentifier };
+    targetAcc = { id: accountIdentifier, phone: cleanId };
   }
 
-  // Instantly mark active in memory & DOM
+  // 1. Optimistic Instant UI Update (0ms latency!)
   if (state.accounts && state.accounts.length > 0) {
     state.accounts.forEach(a => {
-      a.is_active = (String(a.id) === String(accountIdentifier) || a.phone === String(accountIdentifier) || (targetAcc.phone && a.phone === targetAcc.phone)) ? 1 : 0;
+      const match = (String(a.id) === String(targetAcc.id)) || 
+                    (targetAcc.phone && a.phone && String(a.phone).replace(/\D/g, '') === String(targetAcc.phone).replace(/\D/g, ''));
+      a.is_active = match ? 1 : 0;
     });
     storage.set(ACCOUNTS_STORAGE_KEY, JSON.stringify(state.accounts));
   }
   state.activeAccount = targetAcc;
+
+  // Render all active views (Dashboard, Sidebar, Header, Poster, Settings, Modal) in 0ms!
   renderAccounts();
 
   const name = targetAcc.first_name || 'Account';
-  showNotification(`Switched working account to ${name}!`, 'success');
+  showNotification(`Switched working account to ${name}! Ready to broadcast.`, 'success');
 
   // 2. Persist active credentials in local browser storage
   if (targetAcc.session_string) storage.set('TG_SESSION_STRING', targetAcc.session_string);
   if (targetAcc.phone) storage.set('TG_PHONE', targetAcc.phone);
   if (targetAcc.api_id) storage.set('TG_API_ID', targetAcc.api_id);
   if (targetAcc.api_hash) storage.set('TG_API_HASH', targetAcc.api_hash);
-  if (targetAcc.first_name) {
-    storage.set('TG_USER_INFO', JSON.stringify({
-      id: targetAcc.user_id || targetAcc.id || 0,
-      first_name: targetAcc.first_name || '',
-      last_name: targetAcc.last_name || '',
-      username: targetAcc.username || '',
-      phone: targetAcc.phone || ''
-    }));
-  }
+  storage.set('TG_USER_INFO', JSON.stringify({
+    id: targetAcc.user_id || targetAcc.id || 0,
+    first_name: targetAcc.first_name || '',
+    last_name: targetAcc.last_name || '',
+    username: targetAcc.username || '',
+    phone: targetAcc.phone || ''
+  }));
 
-  // 3. Send non-blocking activation command to backend with full account payload
+  // 3. Indicate loading groups for the new account
+  const kpiGroups = document.getElementById('kpiGroups');
+  if (kpiGroups) kpiGroups.innerText = '...';
+
+  // 4. Send non-blocking activation command to backend with full account payload
   try {
     const data = await safeFetchJson(`/api/accounts/activate`, {
       method: 'POST',
@@ -977,6 +1046,24 @@ async function switchTelegramAccount(accountIdentifier) {
         api_id: targetAcc.api_id,
         api_hash: targetAcc.api_hash,
         user_id: targetAcc.user_id,
+        first_name: targetAcc.first_name,
+        last_name: targetAcc.last_name,
+        username: targetAcc.username
+      })
+    });
+    if (data.success && data.active_account) {
+      state.activeAccount = data.active_account;
+      renderAccounts();
+    }
+  } catch (err) {
+    console.warn('Background account switch sync note:', err);
+  } finally {
+    // Background refresh dialogs and stats without blocking UI
+    loadGroups(true);
+    loadStats();
+    checkStatus();
+  }
+}
         first_name: targetAcc.first_name,
         last_name: targetAcc.last_name,
         username: targetAcc.username
@@ -2139,6 +2226,11 @@ async function loadStats() {
 
     const badgeLead = document.getElementById('badgeLeadCount');
     if (badgeLead && data.leads_count !== undefined) badgeLead.innerText = data.leads_count;
+
+    if (data.active_account) {
+      state.activeAccount = data.active_account;
+      renderAccounts();
+    }
   } catch (err) {
     console.error('Failed to load stats:', err);
   }

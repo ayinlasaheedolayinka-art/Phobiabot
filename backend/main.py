@@ -536,6 +536,7 @@ async def toggle_live_scout(req: LiveScoutToggle):
 
 # ----------------- STATS & LOGS -----------------
 @app.get("/api/stats")
+@app.get("/api/dashboard/stats")
 def get_dashboard_stats():
     conn = get_connection()
     leads_count = conn.execute("SELECT COUNT(*) as c FROM leads").fetchone()["c"]
@@ -552,13 +553,16 @@ def get_dashboard_stats():
         if saved_count and str(saved_count).isdigit():
             groups_count = int(saved_count)
 
+    active_acc = get_active_account()
+
     return {
         "leads_count": leads_count,
         "templates_count": templates_count,
         "campaigns_count": campaigns_count,
         "active_campaigns": active_campaigns,
         "posts_sent": posts_sent,
-        "groups_count": groups_count
+        "groups_count": groups_count,
+        "active_account": active_acc
     }
 
 @app.get("/api/logs")
