@@ -32,6 +32,8 @@
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   <link rel="stylesheet" href="css/style.css" />
+  <!-- QRCode.js for instant QR generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body class="bg-[#0b1120] text-slate-100 font-sans antialiased min-h-screen flex flex-col md:flex-row overflow-x-hidden">
 
@@ -772,11 +774,12 @@
         </p>
 
         <!-- QR Code Image Box -->
-        <div class="flex justify-center p-4 bg-white rounded-2xl w-56 h-56 mx-auto items-center shadow-2xl border-4 border-cyan-500/30">
+        <div class="flex justify-center p-4 bg-white rounded-2xl w-56 h-56 mx-auto items-center shadow-2xl border-4 border-cyan-500/30 overflow-hidden relative">
           <div id="qrLoading" class="text-slate-900 text-xs font-semibold flex flex-col items-center gap-2">
             <i class="fa-solid fa-spinner fa-spin text-2xl text-brand-600"></i>
-            <span>Generating QR code...</span>
+            <span>Connecting to Telegram...</span>
           </div>
+          <div id="qrCanvas" class="hidden"></div>
           <img id="qrImage" src="" alt="Telegram Login QR Code" class="hidden w-48 h-48 rounded-lg" />
         </div>
 

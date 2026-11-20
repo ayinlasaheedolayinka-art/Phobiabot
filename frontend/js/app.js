@@ -63,17 +63,17 @@ const state = {
 document.addEventListener('DOMContentLoaded', () => {
   setupNavigation();
 
-  // Auto-fill credential fields from browser storage if present
+  // Auto-fill credential fields from browser storage or defaults
   try {
-    const savedApiId = storage.get('TG_API_ID');
-    const savedApiHash = storage.get('TG_API_HASH');
-    const savedPhone = storage.get('TG_PHONE');
+    const savedApiId = storage.get('TG_API_ID') || '21040435';
+    const savedApiHash = storage.get('TG_API_HASH') || '2d19c05868a10c46c95b6646710f1e73';
+    const savedPhone = storage.get('TG_PHONE') || '+2347017198661';
     const apiIdEl = document.getElementById('apiIdInput');
     const apiHashEl = document.getElementById('apiHashInput');
     const phoneEl = document.getElementById('phoneInput');
-    if (savedApiId && apiIdEl) apiIdEl.value = savedApiId;
-    if (savedApiHash && apiHashEl) apiHashEl.value = savedApiHash;
-    if (savedPhone && phoneEl) phoneEl.value = savedPhone;
+    if (apiIdEl && !apiIdEl.value) apiIdEl.value = savedApiId;
+    if (apiHashEl && !apiHashEl.value) apiHashEl.value = savedApiHash;
+    if (phoneEl && !phoneEl.value) phoneEl.value = savedPhone;
   } catch (e) {}
 
   // Immediate rendering of fast metrics so mobile screen displays in ~100ms
@@ -403,24 +403,37 @@ async function handleVerifyCode(e) {
 let qrCheckInterval = null;
 
 async function startQrLogin() {
-  const apiIdVal = document.getElementById('loginApiId')?.value?.trim();
-  const apiHashVal = document.getElementById('loginApiHash')?.value?.trim();
-
-  if (!apiIdVal || !apiHashVal) {
-    showNotification('Please enter Telegram API ID and API Hash first', 'warning');
-    return;
+  const btn = document.getElementById('btnStartQr');
+  const oldBtnHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-base"></i> <span>Connecting to Telegram...</span>';
   }
+
+  const apiIdEl = document.getElementById('apiIdInput');
+  const apiHashEl = document.getElementById('apiHashInput');
+
+  let apiIdVal = apiIdEl?.value?.trim() || storage.get('TG_API_ID') || '21040435';
+  let apiHashVal = apiHashEl?.value?.trim() || storage.get('TG_API_HASH') || '2d19c05868a10c46c95b6646710f1e73';
+
+  if (apiIdEl && !apiIdEl.value) apiIdEl.value = apiIdVal;
+  if (apiHashEl && !apiHashEl.value) apiHashEl.value = apiHashVal;
 
   const modal = document.getElementById('qrModal');
   const qrLoading = document.getElementById('qrLoading');
+  const qrCanvas = document.getElementById('qrCanvas');
   const qrImage = document.getElementById('qrImage');
   const qrStatusText = document.getElementById('qrStatusText');
   const qrDirectLink = document.getElementById('qrDirectLink');
 
   modal?.classList.remove('hidden');
   qrLoading?.classList.remove('hidden');
+  if (qrCanvas) {
+    qrCanvas.innerHTML = '';
+    qrCanvas.classList.add('hidden');
+  }
   qrImage?.classList.add('hidden');
-  if (qrStatusText) qrStatusText.innerText = 'Connecting to Telegram...';
+  if (qrStatusText) qrStatusText.innerText = 'Connecting to Telegram servers...';
 
   try {
     const res = await fetch('/api/auth/qr-start', {
@@ -437,19 +450,45 @@ async function startQrLogin() {
     }
 
     const qrUrl = data.url;
-    const qrImgSrc = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrUrl)}`;
-    
+
+    // 1. Render in-browser with qrcodejs
+    let rendered = false;
+    if (qrCanvas && typeof QRCode !== 'undefined') {
+      try {
+        new QRCode(qrCanvas, {
+          text: qrUrl,
+          width: 192,
+          height: 192,
+          colorDark: "#000000",
+          colorLight: "#ffffff",
+          correctLevel: QRCode.CorrectLevel.M
+        });
+        qrLoading?.classList.add('hidden');
+        qrCanvas.classList.remove('hidden');
+        rendered = true;
+      } catch (err) {
+        console.warn('QRCode JS error, falling back to image:', err);
+      }
+    }
+
+    // 2. Also prepare fallback image
     if (qrImage) {
+      const qrImgSrc = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrUrl)}`;
       qrImage.src = qrImgSrc;
       qrImage.onload = () => {
-        qrLoading?.classList.add('hidden');
-        qrImage?.classList.remove('hidden');
+        if (!rendered) {
+          qrLoading?.classList.add('hidden');
+          qrImage?.classList.remove('hidden');
+        }
       };
     }
+
+    // 3. Direct mobile deep link
     if (qrDirectLink) {
       qrDirectLink.href = qrUrl;
       qrDirectLink.classList.remove('hidden');
     }
+
     if (qrStatusText) {
       qrStatusText.innerHTML = '<i class="fa-solid fa-radar mr-1"></i> Waiting for scan... (Auto-confirms immediately)';
     }
@@ -498,13 +537,18 @@ async function startQrLogin() {
           }
         }
       } catch (e) {
-        // Wait for scan
+        // Keep waiting for scan
       }
     }, 2000);
 
   } catch (err) {
     showNotification(err.message, 'error');
     closeQrModal();
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = oldBtnHtml || '<i class="fa-solid fa-qrcode text-base text-cyan-400"></i> <span>Log In Instantly via Telegram QR Code</span>';
+    }
   }
 }
 
