@@ -655,17 +655,59 @@ async function logoutTelegram() {
 }
 
 // ----------------- MULTI-ACCOUNT MANAGEMENT -----------------
+const ACCOUNTS_STORAGE_KEY = 'PHOBIA_USER_ACCOUNTS_BACKUP';
+
 async function loadAccounts() {
   try {
     const res = await fetch('/api/accounts');
     if (!res.ok) return;
     const data = await res.json();
-    state.accounts = data.accounts || [];
-    state.activeAccount = data.active_account || null;
+    let serverAccounts = data.accounts || [];
+
+    // Read local browser backup
+    let localBackup = [];
+    try {
+      localBackup = JSON.parse(storage.get(ACCOUNTS_STORAGE_KEY) || '[]');
+    } catch (e) {
+      localBackup = [];
+    }
+
+    // If server has no accounts (e.g. after container redeploy) but browser has backup, restore them!
+    if (serverAccounts.length === 0 && localBackup.length > 0) {
+      try {
+        const syncRes = await fetch('/api/accounts/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accounts: localBackup })
+        });
+        const syncData = await syncRes.json();
+        if (syncData.success && syncData.accounts) {
+          serverAccounts = syncData.accounts;
+        }
+      } catch (syncErr) {
+        console.warn('Auto-sync accounts error:', syncErr);
+      }
+    }
+
+    state.accounts = serverAccounts;
+    state.activeAccount = data.active_account || state.accounts.find(a => a.is_active) || null;
+
+    // Refresh backup with current accounts
+    if (state.accounts.length > 0) {
+      storage.set(ACCOUNTS_STORAGE_KEY, JSON.stringify(state.accounts));
+    }
 
     renderAccounts();
   } catch (err) {
     console.error('Failed to load accounts:', err);
+    try {
+      const localBackup = JSON.parse(storage.get(ACCOUNTS_STORAGE_KEY) || '[]');
+      if (localBackup.length > 0) {
+        state.accounts = localBackup;
+        state.activeAccount = localBackup.find(a => a.is_active) || localBackup[0];
+        renderAccounts();
+      }
+    } catch (e) {}
   }
 }
 

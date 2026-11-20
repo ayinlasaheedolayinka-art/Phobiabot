@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from backend.database import (
     init_db, get_templates, get_template, create_template, update_template, delete_template,
-    sync_templates_bulk, sync_campaigns_bulk,
+    sync_templates_bulk, sync_campaigns_bulk, sync_accounts_bulk,
     get_leads, update_lead_status, delete_lead, clear_leads,
     get_campaigns, create_campaign, update_campaign_status,
     get_logs, log_activity, get_setting, set_setting, get_connection,
@@ -201,6 +201,26 @@ def list_accounts():
         "accounts": get_accounts(),
         "active_account": get_active_account()
     }
+
+class AccountSyncItem(BaseModel):
+    phone: str
+    session_string: str
+    api_id: Optional[int] = None
+    api_hash: Optional[str] = None
+    user_id: Optional[int] = None
+    first_name: Optional[str] = ""
+    last_name: Optional[str] = ""
+    username: Optional[str] = ""
+    is_active: Optional[int] = 0
+
+class AccountSyncRequest(BaseModel):
+    accounts: List[AccountSyncItem]
+
+@app.post("/api/accounts/sync")
+def sync_accounts(req: AccountSyncRequest):
+    items = [a.dict() for a in req.accounts]
+    updated = sync_accounts_bulk(items)
+    return {"success": True, "accounts": updated}
 
 @app.post("/api/accounts/{account_id}/activate")
 async def activate_account(account_id: int):

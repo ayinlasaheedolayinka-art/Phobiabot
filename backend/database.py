@@ -861,3 +861,53 @@ def delete_account(account_id: int) -> bool:
     _export_accounts_internal(cursor)
     conn.close()
     return True
+
+def sync_accounts_bulk(accounts_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = datetime.now().isoformat()
+    for item in accounts_list:
+        phone = (item.get("phone") or "").strip()
+        session_str = (item.get("session_string") or "").strip()
+        if not phone or not session_str:
+            continue
+        cursor.execute("SELECT id FROM telegram_accounts WHERE phone = ?", (phone,))
+        row = cursor.fetchone()
+        if row:
+            cursor.execute("""
+            UPDATE telegram_accounts 
+            SET api_id = ?, api_hash = ?, session_string = ?, user_id = ?, first_name = ?, last_name = ?, username = ?, is_active = ?, updated_at = ?
+            WHERE id = ?
+            """, (
+                item.get("api_id"),
+                item.get("api_hash"),
+                session_str,
+                item.get("user_id"),
+                item.get("first_name", ""),
+                item.get("last_name", ""),
+                item.get("username", ""),
+                item.get("is_active", 0),
+                item.get("updated_at", now),
+                row["id"]
+            ))
+        else:
+            cursor.execute("""
+            INSERT INTO telegram_accounts (phone, api_id, api_hash, session_string, user_id, first_name, last_name, username, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                phone,
+                item.get("api_id"),
+                item.get("api_hash"),
+                session_str,
+                item.get("user_id"),
+                item.get("first_name", ""),
+                item.get("last_name", ""),
+                item.get("username", ""),
+                item.get("is_active", 0),
+                item.get("created_at", now),
+                item.get("updated_at", now)
+            ))
+    conn.commit()
+    _export_accounts_internal(cursor)
+    conn.close()
+    return get_accounts()
