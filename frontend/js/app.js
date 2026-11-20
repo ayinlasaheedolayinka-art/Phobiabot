@@ -542,6 +542,16 @@ async function startQrLogin() {
           }
         }
 
+        if (checkData.error) {
+          const errLower = (checkData.error || '').toLowerCase();
+          if (!errLower.includes('expired') && !errLower.includes('token') && !errLower.includes('active') && !errLower.includes('waiting')) {
+            clearInterval(qrCheckInterval);
+            closeQrModal();
+            showNotification(checkData.error, 'error');
+            return;
+          }
+        }
+
         if (checkData.success) {
           clearInterval(qrCheckInterval);
           closeQrModal();

@@ -344,12 +344,17 @@ class TelegramManager:
 
     async def request_code(self, api_id: int, api_hash: str, phone: str) -> Dict[str, Any]:
         phone = phone.strip().replace(" ", "").replace("-", "")
+        if not phone.startswith("+"):
+            phone = "+" + phone
         set_setting("api_id", api_id)
         set_setting("api_hash", api_hash)
         set_setting("phone", phone)
 
         if self.client and self.client.is_connected():
-            await self.client.disconnect()
+            try:
+                await self.client.disconnect()
+            except Exception:
+                pass
 
         # Initialize fresh StringSession
         self.client = TelegramClient(StringSession(""), api_id, api_hash, auto_reconnect=True)
@@ -451,8 +456,8 @@ class TelegramManager:
     async def _qr_worker(self):
         while not self.qr_done and getattr(self, "qr_instance", None):
             try:
-                # Keep wait() executing uninterrupted so incoming MTProto UpdateLoginToken is never dropped!
-                user = await self.qr_instance.wait()
+                # Proactively wait with a 20s timeout so token is refreshed before it can expire
+                user = await self.qr_instance.wait(timeout=20.0)
                 self.qr_user = user
                 self.qr_done = True
                 
@@ -486,18 +491,31 @@ class TelegramManager:
                 self.qr_need_2fa = True
                 log_activity("WARN", "AUTH", "Telegram QR login requires 2FA password")
                 break
-            except asyncio.TimeoutError:
-                # Token expired without scan: recreate automatically so code stays fresh
+            except (errors.AuthTokenExpiredError, asyncio.TimeoutError):
+                # Token expired or DC migrated: renew immediately and keep waiting seamlessly
                 try:
                     await self.qr_instance.recreate()
                     self.qr_url = self.qr_instance.url
-                    log_activity("INFO", "AUTH", "Renewed Telegram QR token automatically")
+                    log_activity("INFO", "AUTH", "Telegram QR code refreshed — ready for scan")
+                    continue
                 except Exception as rec_err:
                     self.qr_error = str(rec_err)
+                    log_activity("ERROR", "AUTH", f"Telegram QR recreate failed: {rec_err}")
                     break
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                err_msg = str(e).lower()
+                # Catch any token expiration error including DC migration re-scan requests
+                if "expired" in err_msg or "token" in err_msg or "rescan" in err_msg or "re-scanned" in err_msg:
+                    try:
+                        await self.qr_instance.recreate()
+                        self.qr_url = self.qr_instance.url
+                        log_activity("INFO", "AUTH", "Telegram DC token refreshed — ready for scan")
+                        continue
+                    except Exception as rec_err:
+                        self.qr_error = str(rec_err)
+                        break
                 self.qr_error = str(e)
                 log_activity("ERROR", "AUTH", f"Telegram QR worker error: {str(e)}")
                 break
