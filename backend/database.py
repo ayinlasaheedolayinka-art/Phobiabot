@@ -10,6 +10,7 @@ DB_PATH = os.path.join(DATA_DIR, "scout_bot.db")
 TEMPLATES_JSON_PATH = os.path.join(DATA_DIR, "templates.json")
 CAMPAIGNS_JSON_PATH = os.path.join(DATA_DIR, "campaigns.json")
 SETTINGS_JSON_PATH = os.path.join(DATA_DIR, "settings.json")
+ACCOUNTS_JSON_PATH = os.path.join(DATA_DIR, "telegram_accounts.json")
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -132,6 +133,72 @@ def _export_settings_internal(cursor):
     except Exception as e:
         print(f"Error exporting settings: {e}")
 
+def _restore_accounts_internal(cursor) -> int:
+    if not os.path.exists(ACCOUNTS_JSON_PATH):
+        return 0
+    try:
+        with open(ACCOUNTS_JSON_PATH, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        if not items or not isinstance(items, list):
+            return 0
+        restored = 0
+        now = datetime.now().isoformat()
+        for item in items:
+            phone = (item.get("phone") or "").strip()
+            session_str = (item.get("session_string") or "").strip()
+            if not phone or not session_str:
+                continue
+            cursor.execute("SELECT id FROM telegram_accounts WHERE phone = ?", (phone,))
+            row = cursor.fetchone()
+            if row:
+                cursor.execute("""
+                UPDATE telegram_accounts 
+                SET api_id = ?, api_hash = ?, session_string = ?, user_id = ?, first_name = ?, last_name = ?, username = ?, is_active = ?, updated_at = ?
+                WHERE id = ?
+                """, (
+                    item.get("api_id"),
+                    item.get("api_hash"),
+                    session_str,
+                    item.get("user_id"),
+                    item.get("first_name", ""),
+                    item.get("last_name", ""),
+                    item.get("username", ""),
+                    item.get("is_active", 0),
+                    item.get("updated_at", now),
+                    row["id"]
+                ))
+            else:
+                cursor.execute("""
+                INSERT INTO telegram_accounts (phone, api_id, api_hash, session_string, user_id, first_name, last_name, username, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    phone,
+                    item.get("api_id"),
+                    item.get("api_hash"),
+                    session_str,
+                    item.get("user_id"),
+                    item.get("first_name", ""),
+                    item.get("last_name", ""),
+                    item.get("username", ""),
+                    item.get("is_active", 0),
+                    item.get("created_at", now),
+                    item.get("updated_at", now)
+                ))
+            restored += 1
+        return restored
+    except Exception as e:
+        print(f"Error restoring accounts: {e}")
+        return 0
+
+def _export_accounts_internal(cursor):
+    try:
+        cursor.execute("SELECT * FROM telegram_accounts ORDER BY id ASC")
+        rows = [dict(r) for r in cursor.fetchall()]
+        with open(ACCOUNTS_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(rows, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error exporting accounts: {e}")
+
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
@@ -216,6 +283,30 @@ def init_db():
     )
     """)
 
+    # Telegram Accounts Table (Multi-Account Support)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS telegram_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone TEXT NOT NULL UNIQUE,
+        api_id INTEGER,
+        api_hash TEXT,
+        session_string TEXT NOT NULL,
+        user_id INTEGER,
+        first_name TEXT,
+        last_name TEXT,
+        username TEXT,
+        is_active INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """)
+
+    # Migration for stop_after_finish on campaigns table
+    try:
+        cursor.execute("ALTER TABLE campaigns ADD COLUMN stop_after_finish INTEGER DEFAULT 1")
+    except Exception:
+        pass
+
     conn.commit()
 
     # Pre-populate or restore templates from persistent file storage
@@ -256,6 +347,59 @@ def init_db():
     # Restore settings from persistent file
     _restore_settings_internal(cursor)
     conn.commit()
+
+    # Restore telegram accounts from persistent file storage
+    _restore_accounts_internal(cursor)
+    conn.commit()
+
+    # If no accounts exist in table, check if settings or credentials backup has an existing logged-in session
+    cursor.execute("SELECT COUNT(*) as count FROM telegram_accounts")
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("SELECT value FROM settings WHERE key = 'session_string'")
+        sess_row = cursor.fetchone()
+        sess_val = (sess_row["value"] if sess_row else "") or ""
+        
+        cursor.execute("SELECT value FROM settings WHERE key = 'phone'")
+        phone_row = cursor.fetchone()
+        phone_val = (phone_row["value"] if phone_row else "") or ""
+        
+        cursor.execute("SELECT value FROM settings WHERE key = 'api_id'")
+        api_id_row = cursor.fetchone()
+        api_id_val = int(api_id_row["value"]) if (api_id_row and api_id_row["value"] and str(api_id_row["value"]).isdigit()) else None
+
+        cursor.execute("SELECT value FROM settings WHERE key = 'api_hash'")
+        api_hash_row = cursor.fetchone()
+        api_hash_val = (api_hash_row["value"] if api_hash_row else "") or ""
+
+        cursor.execute("SELECT value FROM settings WHERE key = 'user_info'")
+        user_row = cursor.fetchone()
+        u_info = {}
+        if user_row and user_row["value"]:
+            try:
+                u_info = json.loads(user_row["value"])
+            except Exception:
+                u_info = {}
+
+        if sess_val and (phone_val or u_info.get("phone")):
+            now = datetime.now().isoformat()
+            p_val = phone_val or u_info.get("phone") or "Account_1"
+            cursor.execute("""
+            INSERT INTO telegram_accounts (phone, api_id, api_hash, session_string, user_id, first_name, last_name, username, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """, (
+                p_val, api_id_val, api_hash_val, sess_val,
+                u_info.get("id"), u_info.get("first_name", "Telegram User"), u_info.get("last_name", ""), u_info.get("username", ""),
+                now, now
+            ))
+            conn.commit()
+            _export_accounts_internal(cursor)
+
+    # Ensure exactly one account is marked active if accounts exist
+    cursor.execute("SELECT COUNT(*) as count FROM telegram_accounts WHERE is_active = 1")
+    if cursor.fetchone()["count"] == 0:
+        cursor.execute("UPDATE telegram_accounts SET is_active = 1 WHERE id = (SELECT id FROM telegram_accounts ORDER BY id ASC LIMIT 1)")
+        conn.commit()
+        _export_accounts_internal(cursor)
 
     # Pre-populate default IPTV keywords if not set
     cursor.execute("SELECT value FROM settings WHERE key = 'scout_keywords'")
@@ -493,9 +637,10 @@ def create_campaign(data: dict) -> int:
     conn = get_connection()
     cursor = conn.cursor()
     now = datetime.now().isoformat()
+    stop_after = int(data.get("stop_after_finish", 1))
     cursor.execute("""
-    INSERT INTO campaigns (name, template_ids, target_group_ids, interval_val, interval_unit, delay_min, delay_max, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'stopped', ?)
+    INSERT INTO campaigns (name, template_ids, target_group_ids, interval_val, interval_unit, delay_min, delay_max, status, stop_after_finish, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'stopped', ?, ?)
     """, (
         data.get("name", "Auto Post Campaign"),
         json.dumps(data.get("template_ids", [])),
@@ -504,6 +649,7 @@ def create_campaign(data: dict) -> int:
         data.get("interval_unit", "minutes"),
         int(data.get("delay_min", 15)),
         int(data.get("delay_max", 45)),
+        stop_after,
         now
     ))
     conn.commit()
@@ -589,3 +735,153 @@ def sync_campaigns_bulk(campaigns_list: List[Dict[str, Any]]) -> List[Dict[str, 
     _export_campaigns_internal(cursor)
     conn.close()
     return get_campaigns()
+
+# Telegram Account Management (Multi-Account Support)
+def get_accounts() -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, phone, api_id, user_id, first_name, last_name, username, is_active, created_at, updated_at FROM telegram_accounts ORDER BY is_active DESC, id ASC")
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+def get_active_account() -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM telegram_accounts WHERE is_active = 1 LIMIT 1")
+    row = cursor.fetchone()
+    if not row:
+        cursor.execute("SELECT * FROM telegram_accounts ORDER BY id ASC LIMIT 1")
+        row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_account(account_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM telegram_accounts WHERE id = ?", (account_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def save_or_update_account(phone: str, api_id: int, api_hash: str, session_string: str, user: dict = None, make_active: bool = True) -> int:
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = datetime.now().isoformat()
+    phone_clean = phone.strip().replace(" ", "").replace("-", "")
+    
+    user_id = user.get("id") if user else None
+    first_name = (user.get("first_name") or "").strip() if user else ""
+    last_name = (user.get("last_name") or "").strip() if user else ""
+    username = (user.get("username") or "").strip() if user else ""
+
+    if make_active:
+        cursor.execute("UPDATE telegram_accounts SET is_active = 0")
+
+    cursor.execute("SELECT id FROM telegram_accounts WHERE phone = ?", (phone_clean,))
+    row = cursor.fetchone()
+    if row:
+        acc_id = row["id"]
+        cursor.execute("""
+        UPDATE telegram_accounts 
+        SET api_id = ?, api_hash = ?, session_string = ?, user_id = ?, first_name = ?, last_name = ?, username = ?, is_active = ?, updated_at = ?
+        WHERE id = ?
+        """, (
+            api_id, api_hash, session_string, user_id, first_name, last_name, username,
+            1 if make_active else 0, now, acc_id
+        ))
+    else:
+        cursor.execute("""
+        INSERT INTO telegram_accounts (phone, api_id, api_hash, session_string, user_id, first_name, last_name, username, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            phone_clean, api_id, api_hash, session_string, user_id, first_name, last_name, username,
+            1 if make_active else 0, now, now
+        ))
+        acc_id = cursor.lastrowid
+
+    conn.commit()
+    _export_accounts_internal(cursor)
+
+    if make_active:
+        # Sync active account to settings
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_id', ?)", (str(api_id),))
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_hash', ?)", (api_hash,))
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('phone', ?)", (phone_clean,))
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('session_string', ?)", (session_string,))
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('user_info', ?)", (json.dumps({
+            "id": user_id,
+            "first_name": first_name,
+            "last_name": last_name,
+            "username": username,
+            "phone": phone_clean
+        }),))
+        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('is_connected', '1')")
+        conn.commit()
+
+    conn.close()
+    return acc_id
+
+def set_active_account(account_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM telegram_accounts WHERE id = ?", (account_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return None
+
+    acc = dict(row)
+    cursor.execute("UPDATE telegram_accounts SET is_active = 0")
+    cursor.execute("UPDATE telegram_accounts SET is_active = 1 WHERE id = ?", (account_id,))
+    
+    # Sync to settings
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_id', ?)", (str(acc["api_id"]),))
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('api_hash', ?)", (acc["api_hash"],))
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('phone', ?)", (acc["phone"],))
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('session_string', ?)", (acc["session_string"],))
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('user_info', ?)", (json.dumps({
+        "id": acc["user_id"],
+        "first_name": acc["first_name"],
+        "last_name": acc["last_name"],
+        "username": acc["username"],
+        "phone": acc["phone"]
+    }),))
+    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('is_connected', '1')")
+    
+    conn.commit()
+    _export_accounts_internal(cursor)
+    conn.close()
+    return acc
+
+def delete_account(account_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM telegram_accounts WHERE id = ?", (account_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return False
+    
+    was_active = bool(row["is_active"])
+    cursor.execute("DELETE FROM telegram_accounts WHERE id = ?", (account_id,))
+    conn.commit()
+
+    if was_active:
+        cursor.execute("SELECT id FROM telegram_accounts ORDER BY id ASC LIMIT 1")
+        next_row = cursor.fetchone()
+        if next_row:
+            next_id = next_row["id"]
+            conn.close()
+            set_active_account(next_id)
+            return True
+        else:
+            # No accounts left
+            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('session_string', '')")
+            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('user_info', '')")
+            cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('is_connected', '0')")
+            conn.commit()
+            
+    _export_accounts_internal(cursor)
+    conn.close()
+    return True

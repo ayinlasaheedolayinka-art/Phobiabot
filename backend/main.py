@@ -17,7 +17,8 @@ from backend.database import (
     sync_templates_bulk, sync_campaigns_bulk,
     get_leads, update_lead_status, delete_lead, clear_leads,
     get_campaigns, create_campaign, update_campaign_status,
-    get_logs, log_activity, get_setting, set_setting, get_connection
+    get_logs, log_activity, get_setting, set_setting, get_connection,
+    get_accounts, get_active_account, set_active_account, delete_account
 )
 from backend.spintax import render_template
 from backend.telegram_client import TelegramManager
@@ -93,6 +94,7 @@ class CampaignCreate(BaseModel):
     interval_unit: str = "minutes"
     delay_min: int = 15
     delay_max: int = 45
+    stop_after_finish: bool = True
 
 class QuickCampaignRequest(BaseModel):
     name: Optional[str] = "Auto-Broadcast to All Groups"
@@ -102,6 +104,7 @@ class QuickCampaignRequest(BaseModel):
     post_to_all: bool = True
     delay_min: int = 10
     delay_max: int = 30
+    stop_after_finish: bool = True
 
 class TestPostRequest(BaseModel):
     group_id: int
@@ -169,6 +172,38 @@ async def restore_session(req: RestoreSessionRequest):
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("error", "Failed to restore session"))
     return res
+
+# ----------------- TELEGRAM MULTI-ACCOUNT ROUTES -----------------
+@app.get("/api/accounts")
+def list_accounts():
+    return {
+        "accounts": get_accounts(),
+        "active_account": get_active_account()
+    }
+
+@app.post("/api/accounts/{account_id}/activate")
+async def activate_account(account_id: int):
+    tg = TelegramManager.get_instance()
+    res = await tg.switch_account(account_id)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Failed to switch account"))
+    return res
+
+@app.delete("/api/accounts/{account_id}")
+async def remove_account(account_id: int):
+    tg = TelegramManager.get_instance()
+    active = get_active_account()
+    was_active = active and active["id"] == account_id
+    ok = delete_account(account_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if was_active:
+        new_active = get_active_account()
+        if new_active:
+            await tg.switch_account(new_active["id"])
+        else:
+            await tg.logout()
+    return {"success": True}
 
 # ----------------- TEMPLATES ROUTES -----------------
 @app.get("/api/templates")
@@ -249,6 +284,7 @@ async def quick_start_campaign(req: QuickCampaignRequest):
         "interval_unit": req.interval_unit,
         "delay_min": max(3, int(req.delay_min)),
         "delay_max": max(5, int(req.delay_max)),
+        "stop_after_finish": 1 if req.stop_after_finish else 0,
     }
 
     camp_id = create_campaign(camp_data)

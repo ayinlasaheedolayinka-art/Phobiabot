@@ -93,13 +93,16 @@
     </div>
 
     <!-- Telegram Account Quick Status in Footer -->
-    <div class="p-4 border-t border-darkBorder bg-slate-900/40">
-      <div id="sidebarAccountCard" class="flex items-center space-x-3 p-2 rounded-lg">
-        <div id="accountStatusDot" class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></div>
-        <div class="flex-1 min-w-0">
-          <p id="accountName" class="text-xs font-semibold truncate">Not Connected</p>
+    <div class="p-3 border-t border-darkBorder bg-slate-900/50">
+      <div id="sidebarAccountCard" class="flex items-center space-x-2.5 p-2 rounded-xl bg-slate-800/40 border border-darkBorder/60 hover:border-slate-600 transition">
+        <div id="accountStatusDot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0"></div>
+        <div class="flex-1 min-w-0 cursor-pointer" onclick="openAccountsModal()">
+          <p id="accountName" class="text-xs font-semibold truncate text-white">Not Connected</p>
           <p id="accountSub" class="text-[11px] text-slate-400 truncate">Connect Telegram</p>
         </div>
+        <button onclick="openAccountsModal()" title="Switch or Manage Telegram Accounts" class="p-1.5 rounded-lg bg-slate-700/60 hover:bg-brand-600 text-slate-300 hover:text-white text-xs transition flex-shrink-0">
+          <i class="fa-solid fa-repeat"></i>
+        </button>
       </div>
     </div>
   </aside>
@@ -277,6 +280,31 @@
         </button>
       </div>
 
+      <!-- 🟢 ACTIVE WORKING ACCOUNT BANNER -->
+      <div id="posterAccountBanner" class="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-darkCard to-slate-900 border border-brand-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+        <div class="flex items-center space-x-3.5">
+          <div class="w-10 h-10 rounded-xl bg-brand-500/20 text-brand-400 flex items-center justify-center text-lg flex-shrink-0">
+            <i class="fa-solid fa-user-check"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Working Telegram Account:</span>
+              <span id="posterActiveAccountName" class="text-sm font-extrabold text-white">Loading account...</span>
+              <span class="bg-brand-500/20 text-brand-400 border border-brand-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">● WORKING</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">Posts strictly to the groups of this working account. Newly joined groups are automatically detected (channels excluded).</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <button onclick="openAccountsModal()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-darkBorder text-xs font-bold flex items-center gap-1.5 transition">
+            <i class="fa-solid fa-repeat text-brand-400"></i> Switch Account
+          </button>
+          <button onclick="loadGroups(true)" class="px-3 py-1.5 rounded-xl bg-brand-600/20 hover:bg-brand-600/30 text-brand-300 border border-brand-500/30 text-xs font-bold flex items-center gap-1.5 transition">
+            <i class="fa-solid fa-arrows-rotate"></i> Refresh Groups
+          </button>
+        </div>
+      </div>
+
       <!-- ⚡ ALL-GROUPS AUTO-BROADCASTER HUB -->
       <div class="bg-gradient-to-br from-slate-900 via-darkCard to-slate-900 border border-brand-500/40 rounded-3xl p-6 shadow-2xl space-y-6">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-darkBorder/60 pb-5">
@@ -304,31 +332,52 @@
         <!-- Schedule & Settings Form -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          <!-- Column 1: Schedule Interval (Seconds, Minutes, Hours) -->
-          <div class="space-y-3 bg-slate-900/60 p-4 rounded-2xl border border-darkBorder/70">
-            <label class="block text-xs font-bold text-brand-400 uppercase tracking-wider">
-              <i class="fa-regular fa-clock mr-1"></i> 1. Schedule Posting Interval
-            </label>
-            <p class="text-[11px] text-slate-400">How often should the bot repeat broadcasts to your groups?</p>
-            
-            <div class="flex items-center space-x-2 pt-1">
-              <input type="number" id="quickIntervalVal" value="30" min="5" class="w-24 bg-slate-950 border border-darkBorder rounded-xl px-3 py-2.5 text-base font-bold text-white focus:outline-none focus:border-brand-500" />
-              <select id="quickIntervalUnit" class="flex-1 bg-slate-950 border border-darkBorder rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-200 focus:outline-none focus:border-brand-500">
-                <option value="seconds">Seconds</option>
-                <option value="minutes" selected>Minutes</option>
-                <option value="hours">Hours</option>
-              </select>
+          <!-- Column 1: Mode & Schedule Interval -->
+          <div class="space-y-4 bg-slate-900/60 p-4 rounded-2xl border border-darkBorder/70">
+            <div>
+              <label class="block text-xs font-bold text-brand-400 uppercase tracking-wider mb-2">
+                <i class="fa-solid fa-sliders mr-1"></i> 1. Broadcast Mode
+              </label>
+              <div class="space-y-2">
+                <label id="modeStopLabel" class="flex items-start space-x-2.5 p-2.5 rounded-xl bg-brand-950/40 border border-brand-500/50 cursor-pointer transition">
+                  <input type="radio" name="quickBroadcastMode" id="quickModeStop" value="single" checked onchange="handleBroadcastModeChange()" class="mt-0.5 text-brand-500 focus:ring-0" />
+                  <div>
+                    <span class="text-xs font-bold text-white block">Post Once to All Groups & Stop</span>
+                    <span class="text-[10px] text-slate-300 leading-tight block mt-0.5">Bot posts to all groups in 1 round, then stops automatically until you click start again.</span>
+                  </div>
+                </label>
+                <label id="modeRepeatLabel" class="flex items-start space-x-2.5 p-2.5 rounded-xl bg-slate-950/40 border border-darkBorder hover:border-slate-600 cursor-pointer transition">
+                  <input type="radio" name="quickBroadcastMode" id="quickModeRepeat" value="repeat" onchange="handleBroadcastModeChange()" class="mt-0.5 text-brand-500 focus:ring-0" />
+                  <div>
+                    <span class="text-xs font-bold text-slate-200 block">Recurring Schedule</span>
+                    <span class="text-[10px] text-slate-400 leading-tight block mt-0.5">Continuously repeats broadcast to all groups at your set interval.</span>
+                  </div>
+                </label>
+              </div>
             </div>
 
-            <!-- Quick Presets -->
-            <div class="pt-2">
-              <span class="text-[10px] text-slate-400 uppercase font-semibold">Quick Presets:</span>
-              <div class="flex flex-wrap gap-1.5 mt-1.5">
-                <button type="button" onclick="setQuickInterval(30, 'seconds')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition">⚡ 30s</button>
-                <button type="button" onclick="setQuickInterval(60, 'seconds')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition">⚡ 60s</button>
-                <button type="button" onclick="setQuickInterval(5, 'minutes')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition">⏱️ 5m</button>
-                <button type="button" onclick="setQuickInterval(15, 'minutes')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition">⏱️ 15m</button>
-                <button type="button" onclick="setQuickInterval(1, 'hours')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition">🕐 1hr</button>
+            <!-- Interval settings (active when Recurring is selected) -->
+            <div id="intervalSettingsBox" class="opacity-60 space-y-2 pt-1 border-t border-darkBorder/60">
+              <div class="flex items-center justify-between">
+                <label class="text-[11px] font-semibold text-slate-400">Repeating Interval:</label>
+                <span id="intervalModeHint" class="text-[10px] text-amber-400 font-mono">(Disabled in Single-Round mode)</span>
+              </div>
+              <div class="flex items-center space-x-2">
+                <input type="number" id="quickIntervalVal" value="30" min="5" class="w-24 bg-slate-950 border border-darkBorder rounded-xl px-3 py-2 text-sm font-bold text-white focus:outline-none focus:border-brand-500" />
+                <select id="quickIntervalUnit" class="flex-1 bg-slate-950 border border-darkBorder rounded-xl px-3 py-2 text-xs font-semibold text-slate-200 focus:outline-none focus:border-brand-500">
+                  <option value="seconds">Seconds</option>
+                  <option value="minutes" selected>Minutes</option>
+                  <option value="hours">Hours</option>
+                </select>
+              </div>
+
+              <!-- Quick Presets -->
+              <div class="flex flex-wrap gap-1.5 pt-1">
+                <button type="button" onclick="setQuickInterval(30, 'seconds')" class="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-200 transition">⚡ 30s</button>
+                <button type="button" onclick="setQuickInterval(60, 'seconds')" class="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-200 transition">⚡ 60s</button>
+                <button type="button" onclick="setQuickInterval(5, 'minutes')" class="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-200 transition">⏱️ 5m</button>
+                <button type="button" onclick="setQuickInterval(15, 'minutes')" class="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-200 transition">⏱️ 15m</button>
+                <button type="button" onclick="setQuickInterval(1, 'hours')" class="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-semibold text-slate-200 transition">🕐 1hr</button>
               </div>
             </div>
           </div>
@@ -392,7 +441,7 @@
 
             <div class="space-y-2 pt-2">
               <button id="btnQuickStartBroadcast" onclick="startQuickBroadcast()" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-brand-600 via-emerald-500 to-teal-600 hover:from-brand-500 hover:to-teal-500 text-white font-extrabold text-sm tracking-wide shadow-xl shadow-brand-600/30 flex items-center justify-center gap-2.5 transition transform active:scale-[0.99]">
-                <i class="fa-solid fa-play"></i> START AUTO-POSTING TO ALL GROUPS
+                <i class="fa-solid fa-play"></i> <span id="quickStartBtnText">START BROADCAST TO ALL GROUPS (Post Once & Stop)</span>
               </button>
               <div class="grid grid-cols-2 gap-2">
                 <button onclick="pauseQuickBroadcast()" class="py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center justify-center gap-1.5">
@@ -621,13 +670,48 @@
         </ol>
       </div>
 
-      <!-- Connection Form -->
-      <div class="bg-darkCard border border-darkBorder rounded-2xl p-6 space-y-6 max-w-2xl">
+      <!-- 👥 MULTI-ACCOUNT MANAGER -->
+      <div class="bg-darkCard border border-darkBorder rounded-2xl p-6 space-y-5 max-w-3xl">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-darkBorder pb-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="font-bold text-lg text-white">Connected Telegram Accounts</h3>
+              <span id="settingsAccountCountBadge" class="bg-brand-500/20 text-brand-400 text-xs font-bold px-2 py-0.5 rounded-full border border-brand-500/30">0 Accounts</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">Switch between accounts instantly. The active account handles all auto-posting and group messaging.</p>
+          </div>
+          <button onclick="toggleAddAccountForm(true)" class="px-3.5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-lg shadow-brand-600/20 flex items-center gap-1.5 transition self-start sm:self-auto">
+            <i class="fa-solid fa-plus"></i> Add Another Account
+          </button>
+        </div>
+
+        <!-- Dynamic Accounts List -->
+        <div id="accountsListContainer" class="space-y-3">
+          <!-- Rendered via JS -->
+          <div class="p-6 text-center text-slate-500 text-xs">
+            <i class="fa-solid fa-spinner fa-spin text-xl mb-2 text-brand-400"></i>
+            <p>Loading connected accounts...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connection / Add Account Form -->
+      <div id="addAccountFormSection" class="bg-darkCard border border-darkBorder rounded-2xl p-6 space-y-6 max-w-2xl">
+        <div class="flex items-center justify-between border-b border-darkBorder pb-3">
+          <div>
+            <h3 id="authFormTitle" class="font-bold text-base text-white">Connect Telegram Account</h3>
+            <p class="text-xs text-slate-400">Enter your MTProto credentials to add an account to the bot.</p>
+          </div>
+          <button id="cancelAddAccountBtn" onclick="toggleAddAccountForm(false)" class="hidden text-xs text-slate-400 hover:text-white px-2.5 py-1 rounded-lg bg-slate-800 transition">
+            Cancel
+          </button>
+        </div>
+
         <div id="connectionStatusBadge" class="p-4 rounded-xl bg-slate-900/60 border border-darkBorder flex items-center justify-between">
           <div class="flex items-center space-x-3">
             <div id="setupDot" class="w-3.5 h-3.5 rounded-full bg-slate-500"></div>
             <div>
-              <p id="setupStatusTitle" class="text-xs font-bold uppercase text-slate-400">Status</p>
+              <p id="setupStatusTitle" class="text-xs font-bold uppercase text-slate-400">Active Account Status</p>
               <p id="setupStatusDesc" class="text-sm font-semibold text-white">Checking status...</p>
             </div>
           </div>
@@ -763,6 +847,21 @@
           </div>
         </div>
 
+        <!-- Broadcast Mode -->
+        <div class="space-y-1.5 p-3 rounded-xl bg-slate-900 border border-darkBorder">
+          <label class="block text-xs font-semibold text-slate-300">Campaign Execution Mode</label>
+          <div class="space-y-1.5">
+            <label class="flex items-center space-x-2 text-xs text-slate-200 cursor-pointer">
+              <input type="radio" name="campMode" id="campModeSingle" value="1" checked class="text-brand-500 focus:ring-0" />
+              <span><strong>Post Once to Selected Groups & Stop</strong> (Single round, auto-stops when finished)</span>
+            </label>
+            <label class="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer">
+              <input type="radio" name="campMode" id="campModeRepeat" value="0" class="text-brand-500 focus:ring-0" />
+              <span><strong>Continuous Repeating Schedule</strong> (Repeats indefinitely every interval)</span>
+            </label>
+          </div>
+        </div>
+
         <!-- Schedule Interval -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -792,6 +891,38 @@
       <div class="flex justify-end space-x-3 pt-3 border-t border-darkBorder">
         <button onclick="closeModal('campaignModal')" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold">Cancel</button>
         <button onclick="saveCampaign()" class="px-5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs">Create & Save Campaign</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Telegram Accounts Switcher -->
+  <div id="accountsModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-darkCard border border-darkBorder w-full max-w-lg rounded-2xl p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-darkBorder pb-3">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-8 h-8 rounded-lg bg-brand-500/20 text-brand-400 flex items-center justify-center">
+            <i class="fa-solid fa-users text-sm"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-base text-white">Switch Telegram Account</h3>
+            <p class="text-xs text-slate-400">Choose which Telegram account the bot posts and scouts with.</p>
+          </div>
+        </div>
+        <button onclick="closeModal('accountsModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- Accounts modal list -->
+      <div id="modalAccountsList" class="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+        <!-- Rendered via JS -->
+      </div>
+
+      <div class="pt-3 border-t border-darkBorder flex items-center justify-between">
+        <button onclick="closeModal('accountsModal'); switchTab('tab-settings'); toggleAddAccountForm(true);" class="px-3.5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition flex items-center gap-1.5">
+          <i class="fa-solid fa-plus"></i> Connect Another Account
+        </button>
+        <button onclick="closeModal('accountsModal')" class="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition">
+          Close
+        </button>
       </div>
     </div>
   </div>

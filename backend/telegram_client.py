@@ -13,7 +13,8 @@ from telethon.tl.functions.channels import JoinChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest
 
 from backend.database import (
-    get_setting, set_setting, log_activity, add_lead, DB_PATH
+    get_setting, set_setting, log_activity, add_lead, DB_PATH,
+    get_accounts, get_active_account, save_or_update_account, set_active_account, delete_account
 )
 from backend.spintax import render_template
 
@@ -262,13 +263,19 @@ class TelegramManager:
                 is_auth = True
                 user_info = self._cached_user or user_info
 
+        accounts = get_accounts()
+        active_acc = get_active_account()
+
         return {
             "has_credentials": has_creds,
             "is_authorized": is_auth,
             "user": user_info,
             "api_id": api_id,
             "phone": phone,
-            "session_string": session_str or ""
+            "session_string": session_str or "",
+            "accounts": accounts,
+            "accounts_count": len(accounts),
+            "active_account": active_acc
         }
 
     async def restore_session(self, session_str: str, api_id: Optional[int] = None, api_hash: Optional[str] = None, phone: Optional[str] = None) -> Dict[str, Any]:
@@ -311,6 +318,17 @@ class TelegramManager:
             self._last_user_check = time.time()
             set_setting("user_info", json.dumps(self._cached_user))
             set_setting("is_connected", "1")
+            
+            # Save or update multi-account registry
+            save_or_update_account(
+                phone=self._cached_user.get("phone") or phone_val or "account",
+                api_id=int(api_id_val or 0),
+                api_hash=api_hash_val or "",
+                session_string=session_str,
+                user=self._cached_user,
+                make_active=True
+            )
+            
             log_activity("SUCCESS", "AUTH", f"Telegram session automatically restored for {me.first_name}!")
             return {"success": True, "user": self._cached_user, "session_string": session_str}
         else:
@@ -341,6 +359,8 @@ class TelegramManager:
             res = await self.client.send_code_request(phone)
             self.phone_code_hash = res.phone_code_hash
             self.temp_phone = phone
+            self.temp_api_id = api_id
+            self.temp_api_hash = api_hash
             log_activity("INFO", "AUTH", f"Telegram login OTP requested for {phone}")
             return {"success": True, "message": "Verification code sent to your Telegram account / SMS"}
         except Exception as e:
@@ -376,6 +396,19 @@ class TelegramManager:
             set_setting("user_info", json.dumps(self._cached_user))
             set_setting("is_connected", "1")
             self._start_keep_alive()
+
+            # Save to multi-account registry
+            api_id_val = int(getattr(self, "temp_api_id", 0) or get_setting("api_id") or 0)
+            api_hash_val = getattr(self, "temp_api_hash", "") or get_setting("api_hash") or ""
+            save_or_update_account(
+                phone=self._cached_user.get("phone") or self.temp_phone,
+                api_id=api_id_val,
+                api_hash=api_hash_val,
+                session_string=saved_str,
+                user=self._cached_user,
+                make_active=True
+            )
+
             log_activity("SUCCESS", "AUTH", f"Successfully logged into Telegram as {me.first_name} (@{me.username})")
             return {
                 "success": True,
@@ -385,6 +418,43 @@ class TelegramManager:
         except Exception as e:
             log_activity("ERROR", "AUTH", f"Sign in failed: {str(e)}")
             return {"success": False, "error": str(e)}
+
+    async def switch_account(self, account_id: int) -> Dict[str, Any]:
+        acc = set_active_account(account_id)
+        if not acc:
+            return {"success": False, "error": "Account not found"}
+
+        # Disconnect old client cleanly
+        if self.client:
+            try:
+                if self.client.is_connected():
+                    await self.client.disconnect()
+            except Exception:
+                pass
+        self.client = None
+        self._cached_user = None
+        self._cached_groups = []
+        self._cached_groups_time = 0
+
+        # Reconnect with new active account
+        client = await self.get_client()
+        self._start_keep_alive()
+
+        user_display = acc.get("first_name", "")
+        if acc.get("username"):
+            user_display += f" (@{acc.get('username')})"
+        phone_display = f"+{acc.get('phone')}" if acc.get("phone") else ""
+
+        log_activity("SUCCESS", "AUTH", f"Switched working Telegram account to {user_display} {phone_display}")
+
+        # Fetch groups for new active account immediately
+        groups = await self.get_dialogs_and_groups(force_refresh=True)
+
+        return {
+            "success": True,
+            "active_account": acc,
+            "groups_count": len(groups)
+        }
 
     async def logout(self) -> Dict[str, Any]:
         try:

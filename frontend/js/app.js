@@ -48,6 +48,8 @@ if (API_BASE) {
 // State Store
 const state = {
   status: null,
+  accounts: [],
+  activeAccount: null,
   templates: [],
   groups: [],
   campaigns: [],
@@ -78,6 +80,8 @@ document.addEventListener('DOMContentLoaded', () => {
   loadStats();
   loadLogs();
   checkStatus();
+  loadAccounts();
+  handleBroadcastModeChange();
 
   // Parallel background refresh of full data
   refreshAll();
@@ -129,10 +133,10 @@ function switchTab(tabId) {
 
   // Lazy loaders based on active tab
   if (tabId === 'tab-templates') loadTemplates();
-  if (tabId === 'tab-poster') { loadCampaigns(); loadGroups(); loadTemplates(); }
+  if (tabId === 'tab-poster') { loadCampaigns(); loadGroups(); loadTemplates(); loadAccounts(); handleBroadcastModeChange(); }
   if (tabId === 'tab-scout') loadKeywords();
   if (tabId === 'tab-leads') loadLeads();
-  if (tabId === 'tab-settings') checkStatus();
+  if (tabId === 'tab-settings') { checkStatus(); loadAccounts(); }
 }
 
 // Notification Banner
@@ -173,6 +177,7 @@ function hideNotification() {
 async function refreshAll() {
   await Promise.allSettled([
     checkStatus(),
+    loadAccounts(),
     loadStats(),
     loadLogs(),
     loadTemplates(),
@@ -374,11 +379,13 @@ async function handleVerifyCode(e) {
       if (curPhone) storage.set('TG_PHONE', curPhone);
 
       closeModal('otpModal');
-      showNotification(`Successfully logged into Telegram! Permanent session saved.`, 'success');
+      showNotification(`Successfully logged into Telegram! Account saved.`, 'success');
       await checkStatus();
-      await loadGroups();
+      await loadAccounts();
+      await loadGroups(true);
       await loadStats();
-      switchTab('tab-dashboard');
+      toggleAddAccountForm(false);
+      switchTab('tab-poster');
     } else {
       showNotification(data.detail || data.error || 'Verification failed', 'error');
     }
@@ -405,9 +412,269 @@ async function logoutTelegram() {
     if (data.success) {
       showNotification('Logged out successfully', 'info');
       await checkStatus();
+      await loadAccounts();
     }
   } catch (err) {
     showNotification(err.message, 'error');
+  }
+}
+
+// ----------------- MULTI-ACCOUNT MANAGEMENT -----------------
+async function loadAccounts() {
+  try {
+    const res = await fetch('/api/accounts');
+    if (!res.ok) return;
+    const data = await res.json();
+    state.accounts = data.accounts || [];
+    state.activeAccount = data.active_account || null;
+
+    renderAccounts();
+  } catch (err) {
+    console.error('Failed to load accounts:', err);
+  }
+}
+
+function renderAccounts() {
+  const accounts = state.accounts || [];
+  const active = state.activeAccount || accounts.find(a => a.is_active) || null;
+
+  // 1. Settings tab badge
+  const badge = document.getElementById('settingsAccountCountBadge');
+  if (badge) {
+    badge.innerText = `${accounts.length} ${accounts.length === 1 ? 'Account' : 'Accounts'}`;
+  }
+
+  // 2. Poster working account banner
+  const posterAccName = document.getElementById('posterActiveAccountName');
+  if (posterAccName) {
+    if (active) {
+      const name = `${active.first_name || ''} ${active.last_name || ''}`.trim() || 'Telegram User';
+      const handle = active.username ? ` (@${active.username})` : '';
+      const phone = active.phone ? ` • +${active.phone}` : '';
+      posterAccName.innerText = `${name}${handle}${phone}`;
+    } else {
+      posterAccName.innerText = 'No account connected';
+    }
+  }
+
+  // 3. Settings tab accounts list
+  const container = document.getElementById('accountsListContainer');
+  if (container) {
+    if (accounts.length === 0) {
+      container.innerHTML = `
+        <div class="p-8 text-center bg-slate-900/50 rounded-xl border border-darkBorder space-y-2">
+          <i class="fa-solid fa-user-slash text-3xl text-slate-500"></i>
+          <p class="text-xs text-slate-400">No Telegram accounts connected yet.</p>
+          <button onclick="toggleAddAccountForm(true)" class="mt-2 px-3.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold">
+            Connect Your First Account
+          </button>
+        </div>
+      `;
+    } else {
+      container.innerHTML = accounts.map(acc => {
+        const isActive = active && (active.id === acc.id);
+        const fullName = `${acc.first_name || ''} ${acc.last_name || ''}`.trim() || 'Telegram User';
+        const handle = acc.username ? `@${acc.username}` : 'No username';
+        const phone = acc.phone ? `+${acc.phone}` : '';
+
+        return `
+          <div class="p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            isActive 
+              ? 'bg-gradient-to-r from-brand-950/30 via-darkCard to-slate-900 border-brand-500/60 shadow-lg shadow-brand-500/5' 
+              : 'bg-slate-900/60 border-darkBorder hover:border-slate-600'
+          }">
+            <div class="flex items-center space-x-3.5 min-w-0">
+              <div class="w-11 h-11 rounded-xl flex items-center justify-center font-bold text-sm flex-shrink-0 ${
+                isActive ? 'bg-gradient-to-tr from-brand-600 to-cyan-500 text-white shadow-md' : 'bg-slate-800 text-slate-300'
+              }">
+                ${escapeHtml((acc.first_name || 'T')[0].toUpperCase())}
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h4 class="font-bold text-sm text-white truncate">${escapeHtml(fullName)}</h4>
+                  ${isActive 
+                    ? `<span class="bg-brand-500/20 text-brand-400 border border-brand-500/40 text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                        <span class="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse"></span> ACTIVE / WORKING
+                       </span>`
+                    : `<span class="bg-slate-800 text-slate-400 border border-slate-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">STANDBY</span>`
+                  }
+                </div>
+                <p class="text-xs text-slate-400 truncate mt-0.5">${escapeHtml(handle)} ${phone ? `• <span class="font-mono text-slate-300">${phone}</span>` : ''}</p>
+              </div>
+            </div>
+
+            <div class="flex items-center space-x-2 self-end sm:self-center flex-shrink-0">
+              ${!isActive 
+                ? `<button onclick="switchTelegramAccount(${acc.id})" class="px-3.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-brand-600/20">
+                    <i class="fa-solid fa-repeat"></i> Switch to This Account
+                   </button>`
+                : `<span class="text-xs text-brand-400 font-semibold px-2 py-1 flex items-center gap-1"><i class="fa-solid fa-check"></i> Current Working Account</span>`
+              }
+              <button onclick="deleteTelegramAccount(${acc.id})" title="Remove account" class="p-2 rounded-lg bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/40 text-xs transition">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  // 4. Modal accounts list
+  const modalList = document.getElementById('modalAccountsList');
+  if (modalList) {
+    if (accounts.length === 0) {
+      modalList.innerHTML = `<p class="p-4 text-center text-xs text-slate-500">No accounts saved yet.</p>`;
+    } else {
+      modalList.innerHTML = accounts.map(acc => {
+        const isActive = active && (active.id === acc.id);
+        const fullName = `${acc.first_name || ''} ${acc.last_name || ''}`.trim() || 'Telegram User';
+        const handle = acc.username ? `@${acc.username}` : '';
+        const phone = acc.phone ? `+${acc.phone}` : '';
+
+        return `
+          <div class="p-3 rounded-xl border flex items-center justify-between gap-3 ${
+            isActive ? 'bg-brand-950/30 border-brand-500/50' : 'bg-slate-900 border-darkBorder hover:border-slate-600'
+          }">
+            <div class="flex items-center space-x-3 min-w-0">
+              <div class="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs flex-shrink-0 ${
+                isActive ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-300'
+              }">
+                ${escapeHtml((acc.first_name || 'T')[0].toUpperCase())}
+              </div>
+              <div class="min-w-0">
+                <p class="font-bold text-xs text-white truncate">${escapeHtml(fullName)}</p>
+                <p class="text-[11px] text-slate-400 truncate">${escapeHtml(handle)} ${phone}</p>
+              </div>
+            </div>
+            <div>
+              ${isActive 
+                ? `<span class="text-brand-400 text-xs font-bold px-2 py-1"><i class="fa-solid fa-circle-check mr-1"></i> Active</span>`
+                : `<button onclick="switchTelegramAccount(${acc.id}); closeModal('accountsModal');" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-brand-600 text-slate-200 hover:text-white text-xs font-bold transition flex items-center gap-1">
+                    <i class="fa-solid fa-repeat"></i> Switch
+                   </button>`
+              }
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  // 5. Sidebar account footer update
+  const sidebarDot = document.getElementById('accountStatusDot');
+  const sidebarName = document.getElementById('accountName');
+  const sidebarSub = document.getElementById('accountSub');
+  if (active) {
+    if (sidebarDot) sidebarDot.className = 'w-2.5 h-2.5 rounded-full bg-brand-400 pulse-emerald';
+    if (sidebarName) sidebarName.innerText = `${active.first_name || 'Telegram User'} ${active.username ? `(@${active.username})` : ''}`;
+    if (sidebarSub) sidebarSub.innerText = `${accounts.length} ${accounts.length === 1 ? 'Account' : 'Accounts'} • Active`;
+  } else if (accounts.length > 0) {
+    if (sidebarDot) sidebarDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
+    if (sidebarName) sidebarName.innerText = 'Select Working Account';
+    if (sidebarSub) sidebarSub.innerText = `${accounts.length} Accounts Connected`;
+  } else {
+    if (sidebarDot) sidebarDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500';
+    if (sidebarName) sidebarName.innerText = 'Not Connected';
+    if (sidebarSub) sidebarSub.innerText = 'Connect Telegram';
+  }
+}
+
+async function switchTelegramAccount(accountId) {
+  showNotification('Switching working Telegram account...', 'info');
+  try {
+    const res = await fetch(`/api/accounts/${accountId}/activate`, {
+      method: 'POST'
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      const active = data.active_account || {};
+      const name = active.first_name || 'Account';
+      showNotification(`Switched working account to ${name}! Discovered ${data.groups_count || 0} groups.`, 'success');
+      await loadAccounts();
+      await loadGroups(true);
+      await checkStatus();
+      await loadStats();
+    } else {
+      showNotification(data.detail || data.error || 'Failed to switch account', 'error');
+    }
+  } catch (err) {
+    showNotification(err.message, 'error');
+  }
+}
+
+async function deleteTelegramAccount(accountId) {
+  if (!confirm('Are you sure you want to remove this Telegram account from the bot?')) return;
+  try {
+    const res = await fetch(`/api/accounts/${accountId}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      showNotification('Account removed successfully', 'success');
+      await loadAccounts();
+      await loadGroups(true);
+      await checkStatus();
+    } else {
+      showNotification(data.detail || data.error || 'Failed to delete account', 'error');
+    }
+  } catch (err) {
+    showNotification(err.message, 'error');
+  }
+}
+
+function toggleAddAccountForm(show) {
+  const formSection = document.getElementById('addAccountFormSection');
+  const cancelBtn = document.getElementById('cancelAddAccountBtn');
+  const title = document.getElementById('authFormTitle');
+  if (show) {
+    if (formSection) {
+      formSection.classList.remove('hidden');
+      formSection.scrollIntoView({ behavior: 'smooth' });
+    }
+    if (cancelBtn) cancelBtn.classList.remove('hidden');
+    if (title) title.innerText = 'Add Another Telegram Account';
+    const phoneInput = document.getElementById('phoneInput');
+    if (phoneInput) phoneInput.value = '';
+  } else {
+    if (cancelBtn) cancelBtn.classList.add('hidden');
+    if (title) title.innerText = 'Connect Telegram Account';
+  }
+}
+
+function openAccountsModal() {
+  renderAccounts();
+  openModal('accountsModal');
+}
+
+function handleBroadcastModeChange() {
+  const isStopAfterFinish = document.getElementById('quickModeStop')?.checked ?? true;
+  const btnText = document.getElementById('quickStartBtnText');
+  const intervalBox = document.getElementById('intervalSettingsBox');
+  const intervalHint = document.getElementById('intervalModeHint');
+  const stopLabel = document.getElementById('modeStopLabel');
+  const repeatLabel = document.getElementById('modeRepeatLabel');
+
+  if (isStopAfterFinish) {
+    if (btnText) btnText.innerText = 'START BROADCAST TO ALL GROUPS (Post Once & Stop)';
+    if (intervalBox) intervalBox.classList.add('opacity-60');
+    if (intervalHint) intervalHint.innerText = '(Disabled in Single-Round mode)';
+    if (stopLabel) {
+      stopLabel.className = 'flex items-start space-x-2.5 p-2.5 rounded-xl bg-brand-950/40 border border-brand-500/50 cursor-pointer transition';
+    }
+    if (repeatLabel) {
+      repeatLabel.className = 'flex items-start space-x-2.5 p-2.5 rounded-xl bg-slate-950/40 border border-darkBorder hover:border-slate-600 cursor-pointer transition';
+    }
+  } else {
+    if (btnText) btnText.innerText = 'START REPEATING AUTO-POSTER';
+    if (intervalBox) intervalBox.classList.remove('opacity-60');
+    if (intervalHint) intervalHint.innerText = '(Active - repeats every interval)';
+    if (repeatLabel) {
+      repeatLabel.className = 'flex items-start space-x-2.5 p-2.5 rounded-xl bg-brand-950/40 border border-brand-500/50 cursor-pointer transition';
+    }
+    if (stopLabel) {
+      stopLabel.className = 'flex items-start space-x-2.5 p-2.5 rounded-xl bg-slate-950/40 border border-darkBorder hover:border-slate-600 cursor-pointer transition';
+    }
   }
 }
 
@@ -823,9 +1090,10 @@ async function startQuickBroadcast() {
   const tplVal = document.getElementById('quickTemplateSelect').value;
   const delayMin = parseInt(document.getElementById('quickDelayMin').value) || 10;
   const delayMax = parseInt(document.getElementById('quickDelayMax').value) || 30;
+  const isStopAfterFinish = document.getElementById('quickModeStop')?.checked ?? true;
 
   if (state.groups.length === 0) {
-    showNotification('No Telegram groups found! Please connect your Telegram account first.', 'warning');
+    showNotification('No Telegram groups found on your active account! Please connect your Telegram account or click Refresh Groups.', 'warning');
     return;
   }
 
@@ -835,36 +1103,43 @@ async function startQuickBroadcast() {
   }
 
   btn.disabled = true;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Launching Auto-Broadcaster...';
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Launching Broadcaster...';
 
   try {
     const res = await fetch('/api/campaigns/quick-start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        name: `All-Groups Broadcast (${val} ${unit})`,
+        name: isStopAfterFinish 
+          ? `Single-Round Broadcast (${state.groups.length} Groups)` 
+          : `All-Groups Broadcast (${val} ${unit})`,
         template_ids: templateIds,
         interval_val: val,
         interval_unit: unit,
         post_to_all: true,
         delay_min: delayMin,
-        delay_max: delayMax
+        delay_max: delayMax,
+        stop_after_finish: isStopAfterFinish
       })
     });
     const data = await res.json();
     if (res.ok && data.success) {
-      showNotification(`🚀 Auto-Posting Started! Broadcasting to all ${state.groups.length} groups every ${val} ${unit}.`, 'success');
+      if (isStopAfterFinish) {
+        showNotification(`🚀 Broadcast Launched! Bot is posting once to all ${state.groups.length} groups and will stop automatically when done.`, 'success');
+      } else {
+        showNotification(`🚀 Auto-Posting Started! Broadcasting to all ${state.groups.length} groups every ${val} ${unit}.`, 'success');
+      }
       await loadCampaigns();
       await loadStats();
       await loadLogs();
     } else {
-      showNotification(data.detail || data.error || 'Failed to start auto-poster', 'error');
+      showNotification(data.detail || data.error || 'Failed to start broadcaster', 'error');
     }
   } catch (err) {
     showNotification(err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-play mr-2"></i> START AUTO-POSTING TO ALL GROUPS';
+    handleBroadcastModeChange();
   }
 }
 
@@ -919,8 +1194,10 @@ function renderCampaigns() {
       if (activeCamp.next_run && activeCamp.status === 'running') {
         const d = new Date(activeCamp.next_run);
         qNext.innerText = `${d.toLocaleTimeString()} (every ${activeCamp.interval_val} ${activeCamp.interval_unit})`;
+      } else if (activeCamp.status === 'stopped' && (activeCamp.posts_sent || 0) > 0) {
+        qNext.innerText = 'Completed (Ready to run again)';
       } else {
-        qNext.innerText = activeCamp.status === 'running' ? 'Broadcasting...' : 'None';
+        qNext.innerText = activeCamp.status === 'running' ? 'Broadcasting now...' : 'None';
       }
     }
   } else if (qBadge) {
@@ -963,7 +1240,7 @@ function renderCampaigns() {
             ${statusBadge}
           </div>
           <div class="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-            <span><i class="fa-solid fa-clock text-slate-500 mr-1"></i> Every ${c.interval_val} ${c.interval_unit}</span>
+            <span><i class="fa-solid fa-clock text-slate-500 mr-1"></i> ${c.stop_after_finish ? 'Single Round (Stops when done)' : `Every ${c.interval_val} ${c.interval_unit}`}</span>
             <span><i class="fa-solid fa-layer-group text-slate-500 mr-1"></i> ${tplCount} Templates</span>
             <span><i class="fa-solid fa-users text-slate-500 mr-1"></i> ${grpCount} Groups</span>
             <span class="text-brand-400 font-semibold"><i class="fa-solid fa-paper-plane mr-1"></i> ${c.posts_sent} Posts Sent</span>
@@ -996,6 +1273,7 @@ async function saveCampaign() {
   const intervalUnit = document.getElementById('campIntervalUnit').value;
   const delayMin = parseInt(document.getElementById('campDelayMin').value) || 15;
   const delayMax = parseInt(document.getElementById('campDelayMax').value) || 45;
+  const isSingle = document.getElementById('campModeSingle')?.checked ?? true;
 
   const templateBoxes = document.querySelectorAll('input[name="campTemplate"]:checked');
   const template_ids = Array.from(templateBoxes).map(cb => parseInt(cb.value));
@@ -1027,7 +1305,8 @@ async function saveCampaign() {
         interval_val: intervalVal,
         interval_unit: intervalUnit,
         delay_min: delayMin,
-        delay_max: delayMax
+        delay_max: delayMax,
+        stop_after_finish: isSingle
       })
     });
     if (res.ok) {

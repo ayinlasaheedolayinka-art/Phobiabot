@@ -162,12 +162,15 @@ class CampaignScheduler:
             return
 
         now_str = datetime.now().isoformat()
+        stop_after_finish = bool(campaign.get("stop_after_finish", 1))
         next_dt = self.calculate_next_run(campaign.get("interval_val", 30), campaign.get("interval_unit", "minutes"))
-        update_campaign_status(camp_id, "running", last_run=now_str, next_run=next_dt.isoformat())
+        initial_next_run = None if stop_after_finish else next_dt.isoformat()
+        update_campaign_status(camp_id, "running", last_run=now_str, next_run=initial_next_run)
 
         interval_display = f"{campaign.get('interval_val', 30)} {campaign.get('interval_unit', 'minutes')}"
+        mode_label = "Single Round (Post Once & Stop)" if stop_after_finish else f"Repeating every {interval_display}"
         scope_display = f"ALL {len(group_ids)} Telegram groups (including newly joined groups)"
-        log_activity("INFO", "POSTER", f"🚀 Starting broadcast round for '{camp_name}' to {scope_display}. Interval: every {interval_display}.")
+        log_activity("INFO", "POSTER", f"🚀 Starting broadcast for '{camp_name}' to {scope_display}. Mode: {mode_label}.")
 
         delay_min = max(3, int(campaign.get("delay_min", 10)))
         delay_max = max(delay_min + 3, int(campaign.get("delay_max", 30)))
@@ -205,4 +208,9 @@ class CampaignScheduler:
                 safe_wait = random.randint(delay_min, delay_max)
                 await asyncio.sleep(safe_wait)
 
-        log_activity("SUCCESS", "POSTER", f"✅ Broadcast round finished: {successful_posts}/{len(group_ids)} posts sent. Next round scheduled at {next_dt.strftime('%H:%M:%S')}")
+        if stop_after_finish:
+            update_campaign_status(camp_id, "stopped", last_run=datetime.now().isoformat(), next_run=None)
+            log_activity("SUCCESS", "POSTER", f"✅ Broadcast completed! Sent {successful_posts}/{len(group_ids)} posts to all groups. Bot stopped automatically as requested until you run it again.")
+        else:
+            update_campaign_status(camp_id, "running", last_run=datetime.now().isoformat(), next_run=next_dt.isoformat())
+            log_activity("SUCCESS", "POSTER", f"✅ Broadcast round finished: {successful_posts}/{len(group_ids)} posts sent. Next round scheduled at {next_dt.strftime('%H:%M:%S')}")
