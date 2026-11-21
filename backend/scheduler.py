@@ -144,19 +144,38 @@ class CampaignScheduler:
 
             # Live fresh lookup from Telegram so ALL newly joined groups are discovered
             all_groups = await tg.get_dialogs_and_groups(force_refresh=True)
-            active_group_map = {g["id"]: g for g in all_groups}
+            active_group_map = {}
+            for g in all_groups:
+                active_group_map[g["id"]] = g
+                active_group_map[str(g["id"])] = g
+                try:
+                    active_group_map[int(g["id"])] = g
+                except (ValueError, TypeError):
+                    pass
             all_live_ids = [g["id"] for g in all_groups]
 
             # If target groups is empty or ["all"], dynamically resolve all joined groups
             if not target_groups_raw or target_groups_raw == ["all"] or "all" in target_groups_raw:
                 group_ids = all_live_ids
             else:
-                selected_ids = [int(gid) for gid in target_groups_raw if str(gid).isdigit() or (isinstance(gid, int))]
+                selected_ids = []
+                for gid in target_groups_raw:
+                    try:
+                        selected_ids.append(int(gid))
+                    except (ValueError, TypeError):
+                        if isinstance(gid, str) and gid.strip():
+                            selected_ids.append(gid.strip())
                 # Automatically include any newly joined groups so new groups are always broadcasted to!
                 group_ids = list(dict.fromkeys(selected_ids + all_live_ids))
 
-            # Filter strictly to currently joined postable groups
-            group_ids = [gid for gid in group_ids if gid in active_group_map]
+            # Filter strictly to currently joined postable groups (channels strictly excluded)
+            resolved_group_ids = []
+            for gid in group_ids:
+                if gid in active_group_map:
+                    matched_group = active_group_map[gid]
+                    if matched_group["id"] not in resolved_group_ids:
+                        resolved_group_ids.append(matched_group["id"])
+            group_ids = resolved_group_ids
 
             if not template_ids:
                 log_activity("WARNING", "POSTER", f"Campaign '{camp_name}' has no templates. Please create at least one content template.")

@@ -425,10 +425,18 @@
 
             <!-- Target Selection -->
             <div>
-              <label class="text-[11px] text-slate-400 block mb-1">Target Telegram Groups:</label>
-              <div class="p-2.5 rounded-xl bg-brand-950/40 border border-brand-800/40 text-xs text-brand-300 font-medium flex items-center gap-2">
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-[11px] text-slate-400 font-medium">Target Telegram Groups in Schedule:</label>
+                <button type="button" onclick="loadGroups(true)" class="text-[10px] text-brand-400 hover:text-brand-300 font-semibold flex items-center gap-1">
+                  <i class="fa-solid fa-arrows-rotate"></i> Refresh Groups
+                </button>
+              </div>
+              <div class="p-2.5 rounded-xl bg-brand-950/40 border border-brand-800/40 text-xs text-brand-300 font-medium flex items-center gap-2 mb-2">
                 <i class="fa-solid fa-circle-check text-brand-400 text-sm"></i>
-                <span>Auto-Post to <strong>ALL <span id="quickTargetCountText">0</span> joined groups</strong> (auto-includes newly joined groups, channels excluded)</span>
+                <span>Auto-Post to <strong>ALL <span id="quickTargetCountText">0</span> joined groups</strong> (channels strictly excluded)</span>
+              </div>
+              <div id="quickGroupsList" class="max-h-36 overflow-y-auto space-y-1 p-2 bg-slate-950/80 rounded-xl border border-darkBorder/70 text-xs">
+                <div class="text-slate-500 text-center py-2 text-[11px]"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Loading joined groups...</div>
               </div>
             </div>
 
@@ -1027,6 +1035,6 @@
     </div>
   </div>
 
-  <script src="js/app.js?v=20261120_v7"></script>
+  <script src="js/app.js?v=20261120_v8"></script>
 </body>
 </html>

@@ -1513,6 +1513,31 @@ function renderGroupPickers() {
   if (targetCountText) targetCountText.innerText = totalCount;
   if (kpiGroups) kpiGroups.innerText = totalCount;
 
+  // Quick Broadcaster Target Groups List
+  const quickGroupsList = document.getElementById('quickGroupsList');
+  if (quickGroupsList) {
+    if (state.groups.length === 0) {
+      quickGroupsList.innerHTML = `
+        <div class="text-slate-500 text-center py-2 text-[11px]">
+          No groups found on active account.
+          <button type="button" onclick="loadGroups(true)" class="block mx-auto mt-1 text-cyan-400 hover:underline font-medium">Click to scan groups</button>
+        </div>`;
+    } else {
+      quickGroupsList.innerHTML = state.groups.map(g => `
+        <div class="flex items-center justify-between gap-2 py-1.5 px-2 hover:bg-slate-900/80 rounded-lg transition border border-transparent hover:border-slate-800">
+          <div class="flex items-center space-x-2 min-w-0">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0 animate-pulse"></span>
+            <span class="text-slate-200 font-medium text-xs truncate">${escapeHtml(g.title)}</span>
+          </div>
+          <div class="flex items-center space-x-1.5 flex-shrink-0">
+            <span class="text-[10px] text-slate-400 font-mono bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded">${g.member_count || 0} members</span>
+            <span class="text-[9px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/40 px-1.5 py-0.5 rounded font-extrabold uppercase">GROUP</span>
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+
   // Test Post Target Group Dropdown
   const testGroupSelect = document.getElementById('testPostGroupSelect');
   if (testGroupSelect) {
