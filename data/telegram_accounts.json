@@ -1,6 +1,20 @@
 [
   {
-    "id": 4,
+    "id": 2,
+    "phone": "2347017198661",
+    "api_id": 21040435,
+    "api_hash": "2d19c05868a10c46c95b6646710f1e73",
+    "session_string": "1BJWap1sBu6qOusSkWRzd3GQlpHQjHOkifsAGlaysAHPIKdmMlHJ37R6_ba4adzduNYl4tuDe-Wm5Qh-TxK0vgBHAhOCg6DC-sODMRVmTotVGn-V1gQjCCBwd_QHAScP-zfr7hWzVynHTZhGDquNdCQDoq5XNVhBsc5qAlex1yCOteb71KXSoSo5hbuJj_a3RsPdVXkpSirrWZ3-B1WpJe3c_SnCX97rSz_18-flLnbFP_802UQQOcV7mD42A9VaFV4QaHpk-8kKn4_X48pJh2PL_ZnsZ_Yt5kU1TDQVnG_Y9fTUGAtMrq9FRYGY8rayzjVnJRUg_HpmJe41f_HrfmzlHPIeeiLE=",
+    "user_id": 7066683556,
+    "first_name": "Technically",
+    "last_name": "Technicallsupport",
+    "username": "TechnicalSupportssl",
+    "is_active": 1,
+    "created_at": "2026-11-21T07:13:35.961884",
+    "updated_at": "2026-11-21T07:13:35.961884"
+  },
+  {
+    "id": 1,
     "phone": "+2348139094804",
     "api_id": 21040435,
     "api_hash": "2d19c05868a10c46c95b6646710f1e73",
@@ -9,7 +23,7 @@
     "first_name": "YinlaSolutions",
     "last_name": "",
     "username": "HayinlhaSolutions",
-    "is_active": 1,
+    "is_active": 0,
     "created_at": "2026-11-20T09:26:37.352392",
     "updated_at": "2026-11-20T09:26:37.352392"
   }
