@@ -49,6 +49,23 @@ class TelegramManager:
         return cls._instance
 
     def get_credentials(self) -> tuple[Optional[int], Optional[str], Optional[str], Optional[str]]:
+        # Always check active account from SQLite first to guarantee active account is loaded
+        try:
+            active_acc = get_active_account()
+            if active_acc and active_acc.get("session_string"):
+                api_id = active_acc.get("api_id") or get_setting("api_id")
+                api_hash = active_acc.get("api_hash") or get_setting("api_hash")
+                phone = active_acc.get("phone") or get_setting("phone")
+                session_str = active_acc.get("session_string")
+                try:
+                    api_id = int(api_id) if api_id else 21040435
+                except (ValueError, TypeError):
+                    api_id = 21040435
+                api_hash = api_hash or "2d19c05868a10c46c95b6646710f1e73"
+                return api_id, api_hash, phone, session_str
+        except Exception:
+            pass
+
         api_id = get_setting("api_id")
         api_hash = get_setting("api_hash")
         phone = get_setting("phone")
@@ -674,6 +691,25 @@ class TelegramManager:
         self._cached_groups = []
         self._cached_groups_time = 0
         set_setting("cached_groups_count", "0")
+
+        # Synchronize active credentials immediately into settings and disk
+        if acc.get("session_string"):
+            set_setting("session_string", acc["session_string"])
+            self._save_session_string(acc["session_string"])
+        if acc.get("phone"):
+            set_setting("phone", str(acc["phone"]))
+        if acc.get("api_id"):
+            set_setting("api_id", str(acc["api_id"]))
+        if acc.get("api_hash"):
+            set_setting("api_hash", str(acc["api_hash"]))
+        set_setting("user_info", json.dumps(self._cached_user))
+
+        self._save_credentials_backup(
+            api_id=int(acc.get("api_id") or 21040435),
+            api_hash=acc.get("api_hash") or "2d19c05868a10c46c95b6646710f1e73",
+            phone=str(acc.get("phone") or ""),
+            session_str=acc.get("session_string")
+        )
 
         # Connect in background so API responds in 5ms
         async def _connect_switched():

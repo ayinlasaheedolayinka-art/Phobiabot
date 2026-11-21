@@ -139,8 +139,17 @@ document.addEventListener('DOMContentLoaded', () => {
   loadAccounts();
   handleBroadcastModeChange();
 
-  // Parallel background refresh of full data
-  refreshAll();
+  // Background deferred load of secondary data to prevent request congestion
+  setTimeout(() => {
+    loadTemplates();
+    loadCampaigns();
+    loadLeads();
+    loadKeywords();
+  }, 400);
+
+  setTimeout(() => {
+    loadGroups();
+  }, 1200);
   
   // Background polling for logs and stats every 4 seconds
   setInterval(() => {
@@ -1062,22 +1071,6 @@ async function switchTelegramAccount(accountIdentifier) {
     loadGroups(true);
     loadStats();
     checkStatus();
-  }
-}
-        first_name: targetAcc.first_name,
-        last_name: targetAcc.last_name,
-        username: targetAcc.username
-      })
-    });
-    if (data.success && data.active_account) {
-      state.activeAccount = data.active_account;
-      renderAccounts();
-    }
-    // Background refresh dialogs and status
-    loadGroups(true);
-    checkStatus();
-  } catch (err) {
-    console.warn('Background account switch sync note:', err);
   }
 }
 
@@ -2237,15 +2230,24 @@ async function loadStats() {
 }
 
 async function loadLogs() {
+  const consoleEl = document.getElementById('logsConsole');
   try {
     const res = await fetch('/api/logs?limit=50');
-    if (!res.ok) return;
+    if (!res.ok) {
+      if (consoleEl && consoleEl.innerHTML.includes('Loading live activity...')) {
+        consoleEl.innerHTML = `
+          <div class="flex items-center justify-between text-xs text-slate-400 py-1">
+            <span><i class="fa-solid fa-clock-rotate-left mr-1.5 text-amber-400"></i> Connecting to live bot feed...</span>
+            <button onclick="loadLogs()" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-brand-400 font-semibold text-[11px]"><i class="fa-solid fa-arrows-rotate mr-1"></i> Retry</button>
+          </div>`;
+      }
+      return;
+    }
     const logs = await res.json();
-    const consoleEl = document.getElementById('logsConsole');
     if (!consoleEl) return;
 
     if (!Array.isArray(logs) || logs.length === 0) {
-      consoleEl.innerHTML = `<div class="text-slate-500 italic">No logs recorded yet.</div>`;
+      consoleEl.innerHTML = `<div class="text-slate-400 italic text-xs py-1"><i class="fa-solid fa-circle-check text-brand-400/80 mr-1.5"></i> Bot is active and standing by. No recent errors.</div>`;
       return;
     }
 
@@ -2264,7 +2266,14 @@ async function loadLogs() {
       `;
     }).join('');
   } catch (err) {
-    console.error('Failed to load logs:', err);
+    if (consoleEl && consoleEl.innerHTML.includes('Loading live activity...')) {
+      consoleEl.innerHTML = `
+        <div class="flex items-center justify-between text-xs text-slate-400 py-1">
+          <span><i class="fa-solid fa-clock-rotate-left mr-1.5 text-amber-400"></i> Connecting to live bot feed...</span>
+          <button onclick="loadLogs()" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-brand-400 font-semibold text-[11px]"><i class="fa-solid fa-arrows-rotate mr-1"></i> Retry</button>
+        </div>`;
+    }
+    console.warn('Live activity poll note:', err.message || err);
   }
 }
 

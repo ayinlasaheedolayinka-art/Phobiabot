@@ -18,7 +18,8 @@ from backend.database import (
     get_leads, update_lead_status, delete_lead, clear_leads,
     get_campaigns, create_campaign, update_campaign_status,
     get_logs, log_activity, get_setting, set_setting, get_connection,
-    get_accounts, get_active_account, set_active_account, delete_account
+    get_accounts, get_active_account, set_active_account, delete_account,
+    save_or_update_account
 )
 from backend.spintax import render_template
 from backend.telegram_client import TelegramManager
